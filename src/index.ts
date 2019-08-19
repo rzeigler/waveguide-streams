@@ -16,6 +16,7 @@ import { Option, some, none, option } from "fp-ts/lib/Option";
 import * as o from "fp-ts/lib/Option";
 import { FunctionN, Predicate, Lazy, constTrue } from "fp-ts/lib/function";
 import { pipe } from "fp-ts/lib/pipeable";
+import { flow } from "fp-ts/lib/function";
 import * as wave from "waveguide/lib/io";
 import { IO, RIO, DefaultR } from "waveguide/lib/io";
 import * as resource from "waveguide/lib/resource";
@@ -27,16 +28,17 @@ export type Source<R, E, A> = RIO<R, E, Option<A>>
 
 export type Fold<R, E, A> = <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R, E, S>>) => RIO<R, E, S>
 
-export type Stream<R, E, A> = Managed<R, E, Fold<R, E, A>>;
+export type RStream<R, E, A> = Managed<R, E, Fold<R, E, A>>;
 
+export type Stream<E, A> = RStream<DefaultR, E, A>;
 
-export enum SinkTag {
+// export enum SinkTag {
 
-}
+// }
 
-export interface Sink<R, E, A0, A, B> {
+// export interface Sink<R, E, A0, A, B> {
 
-}
+// }
 
 function sourceFold<R, E, A>(pull: Source<R, E, A>): Fold<R, E, A> {
     return <S>(initial: S, cont: Predicate<S>, f: FunctionN<[S, A], RIO<R, E, S>>) => {
@@ -61,7 +63,7 @@ function sourceFold<R, E, A>(pull: Source<R, E, A>): Fold<R, E, A> {
     }
 }
     
-function arrayFold<R, E, A>(as: ReadonlyArray<A>): Fold<R, E, A> {
+function arrayFold<R, E, A>(as: readonly A[]): Fold<R, E, A> {
     return <S>(initial: S, cont: Predicate<S>, f: FunctionN<[S, A], RIO<R, E, S>>) => {
         function step(current: S, i: number): RIO<R, E, S> {
             if (!cont(current) || i === as.length) {
@@ -83,33 +85,33 @@ function iteratorSource<A>(iter: Iterator<A>): Source<DefaultR, never, A> {
     });
 }
 
-export function fromSource<R, E, A>(r: Managed<R, E, RIO<R, E, Option<A>>>): Stream<R, E, A> {
+export function fromSource<R, E, A>(r: Managed<R, E, RIO<R, E, Option<A>>>): RStream<R, E, A> {
     return resource.map(r, sourceFold);
 }
 
-export function fromArray<A>(as: ReadonlyArray<A>): Stream<DefaultR, never, A> {
+export function fromArray<A>(as: readonly A[]): Stream<never, A> {
     return resource.pure(arrayFold(as));
 }
 
-export function fromIterator<A>(iter: Lazy<Iterator<A>>): Stream<DefaultR, never, A> {
+export function fromIterator<A>(iter: Lazy<Iterator<A>>): Stream<never, A> {
     return pipe(
         resource.encaseRIO(wave.sync(iter)),
         resource.mapWith(iter => sourceFold(iteratorSource(iter)))
     );
 }
 
-export function fromIteratorUnsafe<A>(iter: Iterator<A>): Stream<DefaultR, never, A> {
+export function fromIteratorUnsafe<A>(iter: Iterator<A>): Stream<never, A> {
     return fromIterator(() => iter);
 }
 
-export function once<A>(a: A): Stream<DefaultR, never, A> {
-    function fold<S>(initial: S, cont: Predicate<S>, f: FunctionN<[S, A], RIO<DefaultR, never, S>>) {
+export function once<A>(a: A): Stream<never, A> {
+    function fold<S>(initial: S, cont: Predicate<S>, f: FunctionN<[S, A], RIO<DefaultR, never, S>>): RIO<DefaultR, never, S> {
         return cont(initial) ? f(initial, a) : wave.pure(initial);
     }
     return resource.pure(fold);
 }
 
-export function repeatedly<A>(a: A): Stream<DefaultR, never, A> {
+export function repeatedly<A>(a: A): Stream<never, A> {
     function fold<S>(initial: S, cont: Predicate<S>, f: FunctionN<[S, A], RIO<DefaultR, never, S>>): RIO<DefaultR, never, S> {
         function step(current: S): RIO<DefaultR, never, S> {
             if (cont(current)) {
@@ -123,7 +125,34 @@ export function repeatedly<A>(a: A): Stream<DefaultR, never, A> {
     return resource.pure(fold);
 }
 
-export function concat<R, E, A>(stream1: Stream<R, E, A>, stream2: Stream<R, E, A>): Stream<R, E, A> {
+
+export const empty: Stream<never, never> = 
+    resource.pure(<S>(initial: S, _cont: Predicate<S>, _f: FunctionN<[S, never], RIO<DefaultR, never, S>>) =>
+        wave.pure(initial));
+
+export const never: Stream<never, never> = 
+    resource.pure(<S>(_initial: S, _cont: Predicate<S>, _f: FunctionN<[S, never], RIO<DefaultR, never, S>>) => 
+        wave.never);
+
+export function zipWithIndex<R, E, A>(stream: RStream<R, E, A>): RStream<R, E, readonly [A, number]> {
+    const out: RStream<R, E, readonly [A, number]> = resource.map(
+        stream,
+        (fold) => {
+            function zipFold<S>(initial: S, cont: Predicate<S>, f: FunctionN<[S, readonly [A, number]], RIO<R, E, S>>): RIO<R, E, S> {
+                const folded = fold<readonly [S, number]>(
+                    [initial, 0 as number], 
+                    (s) => cont(s[0]), 
+                    ([s, i], a) => 
+                        wave.map(f(s, [a, i]), (s) => [s, i + 1]))
+                return wave.map(folded, (s) => s[0]);
+            }
+            return zipFold;
+        }
+    );
+    return out;
+}
+
+export function concat<R, E, A>(stream1: RStream<R, E, A>, stream2: RStream<R, E, A>): RStream<R, E, A> {
     function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R, E, S>>): RIO<R, E, S> {
         return pipe(
             resource.use(stream1, (fold1) => fold1(initial, cont, step)),
@@ -139,7 +168,7 @@ export function concat<R, E, A>(stream1: Stream<R, E, A>, stream2: Stream<R, E, 
     return resource.pure(fold);
 }
 
-export function map<R, E, A, B>(stream: Stream<R, E, A>, f: FunctionN<[A], B>): Stream<R, E, B> {
+export function map<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[A], B>): RStream<R, E, B> {
     function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, B], RIO<R, E, S>>): RIO<R, E, S> {
         return resource.use(stream, (outer) => 
             outer(initial, cont, (s, a) => step(s, f(a)))
@@ -148,7 +177,7 @@ export function map<R, E, A, B>(stream: Stream<R, E, A>, f: FunctionN<[A], B>): 
     return resource.pure(fold);
 }
 
-export function chain<R, E, A, B>(stream: Stream<R, E, A>, f: FunctionN<[A], Stream<R, E, B>>): Stream<R, E, B> {
+export function chain<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[A], RStream<R, E, B>>): RStream<R, E, B> {
     function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, B], RIO<R, E, S>>): RIO<R, E, S> {
         return resource.use(stream, (outerfold) => 
             outerfold(initial, cont, (s, a) => {
@@ -165,7 +194,7 @@ export function chain<R, E, A, B>(stream: Stream<R, E, A>, f: FunctionN<[A], Str
     return resource.pure(fold);
 }
 
-export function encaseRIO<R, E, A>(rio: RIO<R, E, A>): Stream<R, E, A> {
+export function encaseRIO<R, E, A>(rio: RIO<R, E, A>): RStream<R, E, A> {
     function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R, E, S>>): RIO<R, E, S> {
         if (cont(initial)) {
             return pipe(
@@ -178,13 +207,17 @@ export function encaseRIO<R, E, A>(rio: RIO<R, E, A>): Stream<R, E, A> {
     return resource.pure(fold)
 }
 
-export function collectArray<R, E, A>(stream: Stream<R, E, A>): RIO<R, E, A[]> {
+export function mapEncaseRIO<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[A], RIO<R, E, B>>): RStream<R, E, B> {
+    return chain(stream, (a) => encaseRIO(f(a)));
+}
+
+export function collectArray<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, A[]> {
     return resource.use(stream, (fold) => 
         fold([] as A[], constTrue, (s, a) => wave.pure([...s, a]))
     )
 }
 
-export function drain<R, E, A>(stream: Stream<R, E, A>): RIO<R, E, void> {
+export function drain<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, void> {
     return resource.use(stream, (fold) => 
         fold(undefined as void, constTrue, (s, _) => wave.pure(s))
     );

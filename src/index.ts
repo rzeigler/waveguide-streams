@@ -116,8 +116,8 @@ function iteratorSource<A>(iter: Iterator<A>): Source<DefaultR, never, A> {
     });
 }
 
-export function fromSource<R, E, A>(r: Managed<R, E, RIO<R, E, Option<A>>>): RStream<R, E, A> {
-    return resource.map(r, sourceFold);
+export function fromSource<R1, R2, E1, E2, A>(r: Managed<R1, E1, RIO<R2, E2, Option<A>>>): RStream<R1 & R2, E1 | E2, A> {
+    return resource.map(r, sourceFold) as RStream<R1 & R2, E1 | E2, A>;
 }
 
 export function fromArray<A>(as: readonly A[]): Stream<never, A> {
@@ -156,7 +156,6 @@ export function repeatedly<A>(a: A): Stream<never, A> {
     return resource.pure(fold);
 }
 
-
 export const empty: Stream<never, never> = 
     resource.pure(<S>(initial: S, _cont: Predicate<S>, _f: FunctionN<[S, never], RIO<DefaultR, never, S>>) =>
         wave.pure(initial));
@@ -183,8 +182,8 @@ export function zipWithIndex<R, E, A>(stream: RStream<R, E, A>): RStream<R, E, r
     return out;
 }
 
-export function concat<R, E, A>(stream1: RStream<R, E, A>, stream2: RStream<R, E, A>): RStream<R, E, A> {
-    function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R, E, S>>): RIO<R, E, S> {
+export function concat<R1, R2, E, A>(stream1: RStream<R1, E, A>, stream2: RStream<R2, E, A>): RStream<R1 & R2, E, A> {
+    function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R1 & R2, E, S>>): RIO<R1 & R2, E, S> {
         return pipe(
             resource.use(stream1, (fold1) => fold1(initial, cont, step)),
             wave.chainWith(

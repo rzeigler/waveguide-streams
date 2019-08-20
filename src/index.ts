@@ -14,15 +14,12 @@
 
 import { Option, some, none, option } from "fp-ts/lib/Option";
 import * as o from "fp-ts/lib/Option";
-import { FunctionN, Predicate, Lazy, constTrue } from "fp-ts/lib/function";
+import { FunctionN, Predicate, Lazy, constant } from "fp-ts/lib/function";
 import { pipe } from "fp-ts/lib/pipeable";
-import { flow } from "fp-ts/lib/function";
 import * as wave from "waveguide/lib/io";
-import { IO, RIO, DefaultR } from "waveguide/lib/io";
+import { RIO, DefaultR } from "waveguide/lib/io";
 import * as resource from "waveguide/lib/resource";
 import { Managed } from "waveguide/lib/resource";
-import * as ref from "waveguide/lib/ref";
-import { array } from "fp-ts/lib/Array";
 
 export type Source<R, E, A> = RIO<R, E, Option<A>>
 
@@ -41,7 +38,7 @@ export function sinkCont<S>(s: S): SinkStepCont<S> {
 }
 
 export interface SinkStepCont<S> {
-    readonly _tag: SinkStepTag.Cont
+    readonly _tag: SinkStepTag.Cont;
     readonly state: S;
 }
 
@@ -60,13 +57,13 @@ export function isSinkDone<S, A0>(s: SinkStep<S, A0>): s is SinkStepDone<S, A0> 
 export interface SinkStepDone<S, A0> {
     readonly _tag: SinkStepTag.Done;
     readonly state: S;
-    readonly leftover: Option<A0>
+    readonly leftover: Option<A0>;
 }
 
 export interface RSink<R, E, S, A0, A, B> {
-   readonly initial: RIO<R, E, S>
-   step(state: S, next: A): RIO<R, E, SinkStep<S, A0>>;
-   extract(step: SinkStep<S, A0>): RIO<R, E, B>;
+    readonly initial: RIO<R, E, S>;
+    step(state: S, next: A): RIO<R, E, SinkStep<S, A0>>;
+    extract(step: SinkStep<S, A0>): RIO<R, E, B>;
 }
 
 export type Sink<E, S, A0, A, B> = RSink<DefaultR, E, S, A0, A, B>;
@@ -252,31 +249,36 @@ export function into<R, E, A, S, A0, B>(stream: RStream<R, E, A>, sink: RSink<R,
     )
 }
 
-export class CollectArray<R, E, A> implements RSink<R, E, A[], never, A, A[]> {
-    readonly initial = wave.pure([] as A[])
-    extract(step: SinkStep<A[], never>): RIO<R, E, A[]> {
+
+export function collectArraySink<R, E, A>(): RSink<R, E, A[], never, A, A[]> {
+    const initial =  wave.pure([] as A[]);
+
+    function extract(step: SinkStep<A[], never>): RIO<R, E, A[]> {
         return wave.pure(step.state);
     }
-    step(state: A[], next: A): RIO<R, E, SinkStep<A[], never>> {
+    
+    function step(state: A[], next: A): RIO<R, E, SinkStep<A[], never>> {
         return wave.pure(sinkCont([...state, next]));
     }
+
+    return { initial, extract, step };
 }
 
-export class Drain<R, E, A> implements RSink<R, E, void, never, A, void> {
-    readonly initial = wave.pure(undefined);
-    extract(step: SinkStep<void, never>): RIO<R, E, void> {
-        return wave.pure(undefined);
-    }
-    step(state: void, next: A): RIO<R, E, SinkStep<void, never>> {
+export function drainSink<R, E, A>(): RSink<R, E, void, never, A, void> {
+    const initial = wave.unit;
+    const extract = constant(wave.unit);
+    function step(state: void, next: A): RIO<R, E, SinkStep<void, never>> {
         return wave.pure(sinkCont(undefined));
     }
+    return { initial, extract, step };
 }
 
+
 export function collectArray<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, A[]> {
-    return into(stream, new CollectArray<R, E, A>());
+    return into(stream, collectArraySink());
 }
 
 export function drain<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, void> {
-    return into(stream, new Drain<R, E, A>());
+    return into(stream, drainSink());
 }
 

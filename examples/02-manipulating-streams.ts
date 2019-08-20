@@ -14,7 +14,6 @@
 
 import { log } from "./common";
 import * as s from "../src";
-import { Stream } from "../src";
 import { IO } from "waveguide/lib/io";
 import * as wave from "waveguide/lib/io";
 import { array } from "fp-ts/lib/Array";
@@ -55,8 +54,6 @@ function randomM(n: number): IO<never, number> {
 }
 
 const ras = s.mapEncaseRIO(as, randomM);
-
-const render = flow(s.collectArray, log)
 
 wave.runR(array.sequence(wave.instances)([
     log(s.collectArray(as)),

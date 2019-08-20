@@ -4,7 +4,7 @@
   "description": "An effect type for typescript/javascript",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "homepage": "https://rzeigler.github.com/waveguide",
+  "homepage": "https://github.com/rzeigler/waveguide-streams",
   "scripts": {
     "clean": "rimraf lib/ build/",
     "build": "tsc",
@@ -20,14 +20,15 @@
     "typescript",
     "promise",
     "future",
-    "effect"
+    "effect",
+    "streams"
   ],
   "bugs": {
-    "url": "https://github.com/rzeigler/waveguide/issues"
+    "url": "https://github.com/rzeigler/waveguide-streams/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rzeigler/waveguide.git"
+    "url": "git+https://github.com/rzeigler/waveguide-streams.git"
   },
   "author": "Ryan Zeigler",
   "license": "Apache-2.0",

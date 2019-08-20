@@ -13,23 +13,11 @@
 // limitations under the License.
 
 import { array } from "fp-ts/lib/Array";
-import { Option, some, none } from "fp-ts/lib/Option";
 import * as cio from "waveguide/lib/console";
 import * as s from "../src";
 import { Stream } from "../src";
-import { DefaultR, IO } from "waveguide/lib/io";
+import { IO } from "waveguide/lib/io";
 import * as wave from "waveguide/lib/io";
-import { Readable } from "stream";
-import { Do } from "fp-ts-contrib/lib/Do";
-import * as resource from "waveguide/lib/resource";
-import { Resource } from "waveguide/lib/resource";
-import * as ref from "waveguide/lib/ref";
-import * as deferred from "waveguide/lib/deferred";
-import { Deferred } from "waveguide/lib/deferred";
-import { Ref } from "waveguide/lib/ref";
-import { Fiber } from "waveguide/lib/fiber";
-import { pipe } from "fp-ts/lib/pipeable";
-import { read } from "fs";
 
 // A nice helper for logging
 function log<E, A>(tag: string, io: IO<E, A>): IO<E, void> {

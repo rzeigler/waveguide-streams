@@ -11,3 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+import { IO } from "waveguide/lib/io";
+import * as wave from "waveguide/lib/io";
+import * as cio from "waveguide/lib/console";
+
+// A nice helper for logging
+export function log<E, A>(io: IO<E, A>): IO<E, void> {
+    return wave.chain(io, cio.log);
+}

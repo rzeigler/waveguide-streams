@@ -32,13 +32,44 @@ export type RStream<R, E, A> = Managed<R, E, Fold<R, E, A>>;
 
 export type Stream<E, A> = RStream<DefaultR, E, A>;
 
-// export enum SinkTag {
+export enum SinkStepTag { Cont, Done }
 
-// }
+export type SinkStep<S, A0> = SinkStepCont<S> | SinkStepDone<S, A0>;
 
-// export interface Sink<R, E, A0, A, B> {
+export function sinkCont<S>(s: S): SinkStepCont<S> {
+    return { _tag: SinkStepTag.Cont, state: s };
+}
 
-// }
+export interface SinkStepCont<S> {
+    readonly _tag: SinkStepTag.Cont
+    readonly state: S;
+}
+
+export function sinkDone<S, A0>(s: S, left: Option<A0>): SinkStepDone<S, A0> {
+    return { _tag: SinkStepTag.Done, state: s, leftover: left };
+}
+
+export function isSinkCont<S, A0>(s: SinkStep<S, A0>): s is SinkStepCont<S> {
+    return s._tag === SinkStepTag.Cont;
+}
+
+export function isSinkDone<S, A0>(s: SinkStep<S, A0>): s is SinkStepDone<S, A0> {
+    return s._tag === SinkStepTag.Done;
+}
+
+export interface SinkStepDone<S, A0> {
+    readonly _tag: SinkStepTag.Done;
+    readonly state: S;
+    readonly leftover: Option<A0>
+}
+
+export interface RSink<R, E, S, A0, A, B> {
+   readonly initial: RIO<R, E, S>
+   step(state: S, next: A): RIO<R, E, SinkStep<S, A0>>;
+   extract(step: SinkStep<S, A0>): RIO<R, E, B>;
+}
+
+export type Sink<E, S, A0, A, B> = RSink<DefaultR, E, S, A0, A, B>;
 
 function sourceFold<R, E, A>(pull: Source<R, E, A>): Fold<R, E, A> {
     return <S>(initial: S, cont: Predicate<S>, f: FunctionN<[S, A], RIO<R, E, S>>) => {
@@ -211,14 +242,42 @@ export function mapEncaseRIO<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<
     return chain(stream, (a) => encaseRIO(f(a)));
 }
 
-export function collectArray<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, A[]> {
+export function into<R, E, A, S, A0, B>(stream: RStream<R, E, A>, sink: RSink<R, E, S, A0, A, B>): RIO<R, E, B> {
     return resource.use(stream, (fold) => 
-        fold([] as A[], constTrue, (s, a) => wave.pure([...s, a]))
+        pipe(
+            sink.initial,
+            wave.chainWith((init) =>
+                fold(sinkCont(init) as SinkStep<S, A0>, isSinkCont, (s, a) => sink.step(s.state, a))),
+            wave.chainWith(sink.extract)
+        )
     )
 }
 
-export function drain<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, void> {
-    return resource.use(stream, (fold) => 
-        fold(undefined as void, constTrue, (s, _) => wave.pure(s))
-    );
+export class CollectArray<R, E, A> implements RSink<R, E, A[], never, A, A[]> {
+    readonly initial = wave.pure([] as A[])
+    extract(step: SinkStep<A[], never>): RIO<R, E, A[]> {
+        return wave.pure(step.state);
+    }
+    step(state: A[], next: A): RIO<R, E, SinkStep<A[], never>> {
+        return wave.pure(sinkCont([...state, next]));
+    }
 }
+
+export class Drain<R, E, A> implements RSink<R, E, void, never, A, void> {
+    readonly initial = wave.pure(undefined);
+    extract(step: SinkStep<void, never>): RIO<R, E, void> {
+        return wave.pure(undefined);
+    }
+    step(state: void, next: A): RIO<R, E, SinkStep<void, never>> {
+        return wave.pure(sinkCont(undefined));
+    }
+}
+
+export function collectArray<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, A[]> {
+    return into(stream, new CollectArray<R, E, A>());
+}
+
+export function drain<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, void> {
+    return into(stream, new Drain<R, E, A>());
+}
+

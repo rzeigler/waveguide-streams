@@ -22,6 +22,7 @@ import { expectExit } from "./tools.spec";
 import { pipe } from "fp-ts/lib/pipeable";
 import { Option, none, some } from "fp-ts/lib/Option";
 import { RSink, liftPureSink } from "../src/sink";
+import * as sink from "../src/sink";
 import { DefaultR, RIO } from "waveguide/lib/io";
 import { SinkStep, sinkCont, sinkDone, } from "../src/step";
 
@@ -115,5 +116,22 @@ describe("streams", () => {
             const s2 = s.transduce(s1, transducer());
             return expectExit(s.collectArray(s2), done([10, -60, 0]));
         });
-    })
+
+        it("should emit nothing when a transducer makes no progress", () => {
+            const s1 = s.fromArray([2, 4, 6]);
+            const s2 = s.transduce(s1, sink.constSink(5));
+            return expectExit(s.collectArray(s2), done([]));
+        });
+    });
+    describe("peel", () => {
+        it("should extract a head and return a subsequent element", () => {
+            const multiplier = sink.map(sink.headSink<DefaultR, never, number>(), (opt) => opt._tag === "Some" ? opt.value : 1);
+            const s1 = s.fromArray([2, 6, 9])
+            const s2 =  
+                s.chain(s.peel(s1, multiplier), 
+                    ([head, rest]) =>
+                        s.map(rest, (v) => v * head))
+            return expectExit(s.collectArray(s2), done([12,18]));
+        })
+    });
 });

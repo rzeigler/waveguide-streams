@@ -16,6 +16,7 @@ import { Option, some, none } from "fp-ts/lib/Option";
 import { constant, FunctionN, flow } from "fp-ts/lib/function";
 import * as wave from "waveguide/lib/io";
 import { DefaultR, RIO } from "waveguide/lib/io";
+import * as cio from "waveguide/lib/console";
 import { SinkStep, sinkDone, sinkCont, traverse as stepTraverse } from "./step";
 import { pipe } from "fp-ts/lib/pipeable";
 import { Applicative } from "fp-ts/lib/Applicative";
@@ -87,6 +88,18 @@ export function lastSink<R, E, A>(): RSink<R, E, Option<A>, never, A, Option<A>>
         return wave.pure(sinkCont(some(next)));
     }
     return { initial, extract: wave.pure, step };
+}
+
+export function evalSink<R, E, A>(f: FunctionN<[A], RIO<R, E, unknown>>): RSink<R, E, void, never, A, void> {
+    const initial = wave.pure(sinkCont(undefined as void));
+
+    function step(_state: void, next: A): RIO<R, E, SinkStep<never, void>> {
+        return wave.applySecond(f(next), wave.pure(sinkCont(_state)));
+    }
+
+    const extract = constant(wave.unit)
+
+    return { initial, extract, step };
 }
 
 export function map<R, E, S, A0, A, B, C>(sink: RSink<R, E, S, A0, A, B>, f: FunctionN<[B], C>): RSink<R, E, S, A0, A, C> {

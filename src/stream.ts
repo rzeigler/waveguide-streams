@@ -63,15 +63,15 @@ function sourceFold<R, E, A>(pull: Source<R, E, A>): Fold<R, E, A> {
 function arrayFold<R, E, A>(as: readonly A[]): Managed<R, E, Fold<R, E, A>> {
     return resource.encaseRIO(wave.map(
         ref.makeRef(0),
-        (cell) => 
+        (cell) =>
             <S>(initial: S, cont: Predicate<S>, f: FunctionN<[S, A], RIO<R, E, S>>) => {
                 function step(current: S): RIO<R, E, S> {
                     if (cont(current)) {
                         return pipe(
                             cell.modify(i => [i, i + 1] as const), // increment the i
                             wave.chainWith(
-                                (i) => i < as.length ? 
-                                    wave.chain(f(current, as[i]), step) : 
+                                (i) => i < as.length ?
+                                    wave.chain(f(current, as[i]), step) :
                                     wave.pure(current)
                             )
                         )
@@ -141,6 +141,16 @@ export const empty: Stream<never, never> =
 export const never: Stream<never, never> =
     resource.pure(<S>(_initial: S, _cont: Predicate<S>, _f: FunctionN<[S, never], RIO<DefaultR, never, S>>) =>
         wave.never);
+
+export function fromOption<A>(opt: Option<A>): Stream<never, A> {
+    return pipe(
+        opt,
+        o.fold(
+            constant(empty as Stream<never, A>),
+            once
+        )
+    );
+}
 
 export function zipWithIndex<R, E, A>(stream: RStream<R, E, A>): RStream<R, E, readonly [A, number]> {
     const out: RStream<R, E, readonly [A, number]> = resource.map(
@@ -243,12 +253,12 @@ export function transduce<R, E, A, S, A0 extends A, B>(stream: RStream<R, E, A>,
                     o.fold(
                         // If no previous state just run initializer
                         () => sink.initial,
-                        (prev) => 
+                        (prev) =>
                             pipe(
                                 // If previous state run initializer
                                 sink.initial,
                                 wave.chainWith(
-                                    (step) => isSinkDone(step) ? 
+                                    (step) => isSinkDone(step) ?
                                         wave.pure(step) :
                                         // then, if we have leftovers in the previous state, step the sink once
                                         pipe(
@@ -267,16 +277,16 @@ export function transduce<R, E, A, S, A0 extends A, B>(stream: RStream<R, E, A>,
             // if we are continuing then drive the transducer once
             const sinkFold = pipe(
                 // Initialize the state against any leftover
-                leftover.get, 
+                leftover.get,
                 wave.chainWith(initialize),
                 // Here we run the fold using the transducer
                 // We also track whether we consumed any items
                 wave.chainWith(
                     (start) =>
                         fold(
-                            [start, false as boolean] as const, 
-                            (s) => isSinkCont(s[0]), 
-                            (s, a) => 
+                            [start, false as boolean] as const,
+                            (s) => isSinkCont(s[0]),
+                            (s, a) =>
                                 wave.map(
                                     sink.step(s[0].state, a),
                                     (s) => [s, true] as const
@@ -302,7 +312,7 @@ export function transduce<R, E, A, S, A0 extends A, B>(stream: RStream<R, E, A>,
                     return pipe(
                         sinkFold,
                         wave.chainWith(
-                            ([b, emit]) => emit ? 
+                            ([b, emit]) => emit ?
                                 wave.chain(step(initial, b), (next) => delegatingFold(next, cont, step)) :
                                 wave.pure(initial)
                         )
@@ -316,6 +326,40 @@ export function transduce<R, E, A, S, A0 extends A, B>(stream: RStream<R, E, A>,
     );
 }
 
+export function peel<R, E, A, S, A0 extends A, B>(stream: RStream<R, E, A>, sink: RSink<R, E, S, A0, A, B>): RStream<R, E, readonly [B, RStream<R, E, A>]> {
+    return resource.map(stream, (fold) => {
+        const sinkFold = pipe(
+            sink.initial,
+            wave.chainWith(
+                (start) =>
+                    fold(start, isSinkCont, (s, a) => sink.step(s.state, a))
+            ),
+            wave.chainWith((end) => 
+                wave.map(
+                    sink.extract(end.state),
+                    (b) => [b, sinkStepLeftover(end)] as const
+                )
+            )
+        );
+        function delegatingFold<S1>(initial: S1, 
+                                    cont: Predicate<S1>, 
+                                    step: FunctionN<[S1, readonly [B, RStream<R, E, A>]], RIO<R, E, S1>>): RIO<R, E, S1> {
+            if (cont(initial)) {
+                return pipe(
+                    sinkFold,
+                    wave.mapWith(
+                        ([b, rest]) =>
+                            [b, concat(fromOption(rest) as RStream<R, E, A>, resource.pure(fold))] as const),
+                    wave.chainWith((out) => step(initial, out))
+                )
+            } else {
+                return wave.pure(initial);
+            }                                        
+        }
+        return delegatingFold;
+    })
+}
+
 export function into<R, E, A, S, A0, B>(stream: RStream<R, E, A>, sink: RSink<R, E, S, A0, A, B>): RIO<R, E, B> {
     return resource.use(stream, (fold) =>
         pipe(
@@ -326,6 +370,22 @@ export function into<R, E, A, S, A0, B>(stream: RStream<R, E, A>, sink: RSink<R,
             wave.chainWith(sink.extract)
         )
     )
+}
+
+export function intoLeftover<R, E, A, S, A0, B>(stream: RStream<R, E, A>, sink: RSink<R, E, S, A0, A, B>): RIO<R, E, readonly [B, Option<A0>]> {
+    return resource.use(stream, (fold) =>
+        pipe(
+            sink.initial,
+            wave.chainWith((init) =>
+                fold(init, isSinkCont, (s, a) => sink.step(s.state, a))),
+            wave.chainWith(
+                (end) =>
+                    wave.map(
+                        sink.extract(end.state),
+                        (b) => [b, sinkStepLeftover(end)] as const
+                    )
+            )
+        ));
 }
 
 export function collectArray<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, A[]> {

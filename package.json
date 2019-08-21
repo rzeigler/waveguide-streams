@@ -9,8 +9,8 @@
     "clean": "rimraf lib/ build/",
     "build": "tsc",
     "test-build": "tsc -p tsconfig.test.json",
-    "test": "mocha --require ts-node/register --project tsconfig.test.json --recursive --watch-extensions ts,tsx test/*",
-    "test-watch": "nodemon -w src -w test -e .ts -x 'tsc -p tsconfig.test.json && mocha --recursive --reporter min build/**/*.spec.js'",
+    "test": "mocha --require ts-node/register --project tsconfig.test.json --recursive --extension ts,tsx test/*",
+    "test-watch": "mocha --require ts-node/register --project tsconfig.test.json --recursive --watch --extension ts,tsx --watch-extensions ts,tsx test/*",
     "lint": "eslint --ext .ts,.tsx src test examples",
     "lint-fix": "eslint --fix --ext .ts,.tsx src test examples",
     "docs": "docs-ts",
@@ -49,7 +49,6 @@
     "esm": "^3.2.5",
     "fast-check": "^1.14.0",
     "fp-ts": "^2.0.0",
-    "fp-ts-contrib": "^0.1.2",
     "mocha": "^5.2.0",
     "mocha-cli": "^1.0.1",
     "nodemon": "^1.18.10",
@@ -58,10 +57,13 @@
     "source-map-support": "^0.5.10",
     "ts-node": "^8.1.0",
     "typescript": "^3.5.2",
-    "waveguide": "1.0.0-11"
+    "waveguide": "1.0.0-12"
+  },
+  "dependencies": {
+    "fp-ts-contrib": "^0.1.2"
   },
   "peerDependencies": {
     "fp-ts": "^2.0.0",
-    "waveguide": "1.0.0-11"
+    "waveguide": "1.0.0-12"
   }
 }

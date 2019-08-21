@@ -23,7 +23,7 @@ import { RIO, DefaultR } from "waveguide/lib/io";
 import * as resource from "waveguide/lib/resource";
 import * as ref from "waveguide/lib/ref";
 import { Managed } from "waveguide/lib/resource";
-import { RSink, collectArraySink, drainSink } from "./sink";
+import { RSink, collectArraySink, drainSink, drainWhileSink } from "./sink";
 import { isSinkCont, SinkStep, isSinkDone, sinkStepLeftover } from "./step";
 
 export type Source<R, E, A> = RIO<R, E, Option<A>>
@@ -170,10 +170,6 @@ export function zipWithIndex<R, E, A>(stream: RStream<R, E, A>): RStream<R, E, r
     return out;
 }
 
-export function concat<R1, R2, E, A>(stream1: RStream<R1, E, A>, stream2: RStream<R2, E, A>): RStream<R1 & R2, E, A> {
-    return concatL(stream1, constant(stream2));
-}
-
 export function concatL<R1, R2, E, A>(stream1: RStream<R1, E, A>, stream2: Lazy<RStream<R2, E, A>>): RStream<R1 & R2, E, A> {
     function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R1 & R2, E, S>>): RIO<R1 & R2, E, S> {
         return pipe(
@@ -190,23 +186,106 @@ export function concatL<R1, R2, E, A>(stream1: RStream<R1, E, A>, stream2: Lazy<
     return resource.pure(fold);
 }
 
+export function concat<R1, R2, E, A>(stream1: RStream<R1, E, A>, stream2: RStream<R2, E, A>): RStream<R1 & R2, E, A> {
+    return concatL(stream1, constant(stream2));
+}
 
 export function repeat<R1, E, A>(stream: RStream<R1, E, A>): RStream<R1, E, A> {
     return concatL(stream, () => repeat(stream));
 }
 
 export function map<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[A], B>): RStream<R, E, B> {
-    function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, B], RIO<R, E, S>>): RIO<R, E, S> {
-        return resource.use(stream, (outer) =>
+    return resource.map(stream, (outer) => 
+        <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, B], RIO<R, E, S>>): RIO<R, E, S> => 
             outer(initial, cont, (s, a) => step(s, f(a)))
-        );
-    }
-    return resource.pure(fold);
+    )
+}
+
+export function mapWith<A, B>(f: FunctionN<[A], B>): <R, E>(stream: RStream<R, E, A>) => RStream<R, E, B> {
+    return (stream) => map(stream, f);
+}
+
+export function filter<R, E, A>(stream: RStream<R, E, A>, f: Predicate<A>): RStream<R, E, A> {
+    return resource.map(stream, (outer) => 
+        <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R, E, S>>): RIO<R, E, S> => 
+            outer(initial, cont, (s, a) => f(a) ? step(s, a) : wave.pure(s))
+    );
+}
+
+export function filterWith<A>(f: Predicate<A>): <R, E>(stream: RStream<R, E, A>) => RStream<R, E, A> {
+    return (stream) => filter(stream, f);
+}
+
+export function foldM<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[B, A], RIO<R, E, B>>, seed: B): RStream<R, E, B> {
+    return resource.map(stream, (outer) => 
+        <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, B], RIO<R, E, S>>): RIO<R, E, S> =>
+            cont(initial) ? 
+                wave.chain(
+                    outer(seed, constant(true), (s, a) => f(s, a)),
+                    (result) => step(initial, result)
+                ) :
+                wave.pure(initial)
+    );
+}
+
+export function fold<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[B, A], B>, seed: B): RStream<R, E, B> {
+    return foldM(stream, (b, a) => wave.pure(f(b, a)), seed);
+}
+
+function t2<A, B>(a: A, b: B): readonly [A, B] {
+    return [a, b];
+}
+
+export function scanM<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[B, A], RIO<R, E, B>>, seed: B): RStream<R, E, B> {
+    return concat(
+        once(seed) as RStream<R, E, B>,
+        pipe(
+            resource.zip(
+                stream,
+                resource.encaseRIO(ref.makeRef(seed))
+            ),
+            resource.mapWith(
+                ([base, accum]) => {
+                    function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, B], RIO<R, E, S>>): RIO<R, E, S> {
+                        if (cont(initial)) {
+                            // We need to figure out how to drive the base fold for a single step
+                            // Thus, we switch state from true to false on execution
+                            return pipe(
+                                accum.get,
+                                wave.chainWith(
+                                    (b) => 
+                                        base(t2(b, true), (s) => s[1], (s, a) => 
+                                            wave.map(f(s[0], a), (r) => t2(r, false)))
+                                ),
+                                wave.chainWith(
+                                    // If this is still true, we didn't consume anything so advance
+                                    (s) => s[1] ? 
+                                        wave.pure(initial) : 
+                                        wave.applySecond(
+                                            accum.set(s[0]),
+                                            wave.chain(step(initial, s[0]), (next) => fold(next, cont, step))
+                                        )
+                                )
+                            )
+                            
+                        } else {
+                            return wave.pure(initial);
+                        }
+                    }
+                    return fold;
+                }
+            )
+        )
+    );
+}
+
+export function scan<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[B, A], B>, seed: B): RStream<R, E, B> {
+    return scanM(stream, (b, a) => wave.pure(f(b, a)), seed);
 }
 
 export function chain<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[A], RStream<R, E, B>>): RStream<R, E, B> {
-    function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, B], RIO<R, E, S>>): RIO<R, E, S> {
-        return resource.use(stream, (outerfold) =>
+    return resource.map(stream, (outerfold) => 
+        <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, B], RIO<R, E, S>>): RIO<R, E, S> => 
             outerfold(initial, cont, (s, a) => {
                 if (cont(s)) {
                     const inner = f(a);
@@ -216,12 +295,10 @@ export function chain<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[A], RS
                 }
                 return wave.pure(s);
             })
-        )
-    }
-    return resource.pure(fold);
+    )
 }
 
-export function encaseRIO<R, E, A>(rio: RIO<R, E, A>): RStream<R, E, A> {
+export function encase<R, E, A>(rio: RIO<R, E, A>): RStream<R, E, A> {
     function fold<S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R, E, S>>): RIO<R, E, S> {
         if (cont(initial)) {
             return pipe(
@@ -234,8 +311,8 @@ export function encaseRIO<R, E, A>(rio: RIO<R, E, A>): RStream<R, E, A> {
     return resource.pure(fold)
 }
 
-export function mapEncaseRIO<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[A], RIO<R, E, B>>): RStream<R, E, B> {
-    return chain(stream, (a) => encaseRIO(f(a)));
+export function mapM<R, E, A, B>(stream: RStream<R, E, A>, f: FunctionN<[A], RIO<R, E, B>>): RStream<R, E, B> {
+    return chain(stream, (a) => encase(f(a)));
 }
 
 export function transduce<R, E, A, S, A0 extends A, B>(stream: RStream<R, E, A>, sink: RSink<R, E, S, A0, A, B>): RStream<R, E, B> {
@@ -342,8 +419,8 @@ export function peel<R, E, A, S, A0 extends A, B>(stream: RStream<R, E, A>, sink
             )
         );
         function delegatingFold<S1>(initial: S1, 
-                                    cont: Predicate<S1>, 
-                                    step: FunctionN<[S1, readonly [B, RStream<R, E, A>]], RIO<R, E, S1>>): RIO<R, E, S1> {
+            cont: Predicate<S1>, 
+            step: FunctionN<[S1, readonly [B, RStream<R, E, A>]], RIO<R, E, S1>>): RIO<R, E, S1> {
             if (cont(initial)) {
                 return pipe(
                     sinkFold,
@@ -358,6 +435,57 @@ export function peel<R, E, A, S, A0 extends A, B>(stream: RStream<R, E, A>, sink
         }
         return delegatingFold;
     })
+}
+
+export function dropWhile<R, E, A>(stream: RStream<R, E, A>, pred: Predicate<A>): RStream<R, E, A> {
+    return chain(
+        peel(stream, drainWhileSink(pred)),
+        ([found, rest]) => 
+            concat(fromOption(found) as RStream<R, E, A>, rest)
+    )
+}
+
+export function drop<R, E, A>(stream: RStream<R, E, A>, n: number): RStream<R, E, A> {
+    return pipe(
+        zipWithIndex(stream),
+        filterWith(([_, i]) => i >= n),
+        mapWith(([a]) => a)
+    )
+}
+
+export function dropWith(n: number): <R, E, A>(stream: RStream<R, E, A>) => RStream<R, E, A> {
+    return (stream) => drop(stream, n);
+}
+
+export function take<R, E, A>(stream: RStream<R, E, A>, n: number): RStream<R, E, A> {
+    return resource.map(stream, (fold) => 
+        <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R, E, S>>): RIO<R, E, S> =>
+            wave.map(
+                fold(
+                    t2(initial, 0), 
+                    (t2s) => t2s[1] < n && cont(t2s[0]), 
+                    (s, a) => wave.map(step(s[0], a), (next) => t2(next, s[1] + 1))
+                ),
+                (t2s) => t2s[0]
+            )
+    );
+}
+
+export function takeWhile<R, E, A>(stream: RStream<R, E, A>, pred: Predicate<A>): RStream<R, E, A> {
+    return resource.map(stream, (fold) => 
+        <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], RIO<R, E, S>>): RIO<R, E, S> =>
+            wave.map(
+                fold(
+                    t2(initial, true),
+                    (t2s) => t2s[1] && cont(t2s[0]),
+                    (s, a) => 
+                        pred(a) ? 
+                            wave.map(step(s[0], a), (next) => t2(next, true)) :
+                            wave.pure(t2(s[0], false)) 
+                ),
+                (t2s) => t2s[0]
+            )
+    )
 }
 
 export function into<R, E, A, S, A0, B>(stream: RStream<R, E, A>, sink: RSink<R, E, S, A0, A, B>): RIO<R, E, B> {

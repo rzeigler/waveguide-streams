@@ -85,6 +85,37 @@ describe("streams", () => {
             const s2 = s.map(s1, (i) => i + 1);
             return expectExit(s.collectArray(s2), done([2, 3]));
         });
+        it("should map empty streams", () => {
+            const s1 = s.empty;
+            const s2 = s.map(s1, (i) => i + 1);
+            return expectExit(s.collectArray(s2), done([]));
+        });
+    });
+    describe("fold", () => {
+        it("should fold a stream down", () => {
+            const s1 = s.fromArray([1, 2]);
+            const s2 = s.fold(s1, (a, b) => a + b, 0);
+            return expectExit(s.collectArray(s2), done([3]));
+        });
+        it("should handle empty streams", () => {
+            const s1 = s.empty as Stream<never, number>
+            const s2 = s.fold(s1, (a, b) => a + b, 0);
+            return expectExit(s.collectArray(s2), done([0]));
+        });
+    });
+    describe("filter", () => {
+        it("should filter", () => {
+            const s1 = s.fromArray([1, 2, 3, 4]);
+            const s2 = s.filter(s1, (f) => f % 2 === 0);
+            return expectExit(s.collectArray(s2), done([2, 4]));
+        })
+    })
+    describe("scan", () => {
+        it("should scan a stream", () => {
+            const s1 = s.fromArray([1, 2]);
+            const s2 = s.scan(s1, (a, b) => a + b, 0);
+            return expectExit(s.collectArray(s2), done([0, 1, 3]));
+        });
     })
     describe("transduce", () => {
         // We describe transduction as the process of consuming some elements (1 or more) to produce an output element
@@ -110,12 +141,17 @@ describe("streams", () => {
 
             return liftPureSink({ initial, step, extract })
         }
-
         it("should perform transduction", () => {
             const s1 = s.fromArray([2, 4, 6, 3, -10, -20, -30, 2]);
             const s2 = s.transduce(s1, transducer());
             return expectExit(s.collectArray(s2), done([10, -60, 0]));
         });
+
+        it("should transduce empty streams", () => {
+            const s1 = s.empty as Stream<never, number>;
+            const s2 = s.transduce(s1, transducer());
+            return expectExit(s.collectArray(s2), done([]));
+        })
 
         it("should emit nothing when a transducer makes no progress", () => {
             const s1 = s.fromArray([2, 4, 6]);
@@ -132,6 +168,44 @@ describe("streams", () => {
                     ([head, rest]) =>
                         s.map(rest, (v) => v * head))
             return expectExit(s.collectArray(s2), done([12,18]));
-        })
+        });
     });
+    describe("drop", () => {
+        it("should drop n elements", () => {
+            const s1 = s.fromArray([1, 2, 3, 4, 5]);
+            const s2 = s.drop(s1, 3);
+            return expectExit(s.collectArray(s2), done([4, 5]));
+        });
+        it("should drop n elements when that is more than in the stream", () => {
+            const s1 = s.fromArray([1, 2, 3]);
+            const s2 = s.drop(s1, 4);
+            return expectExit(s.collectArray(s2), done([]));
+        });
+    });
+    describe("dropWhile", () => {
+        it ("should drop elements", () => {
+            const s1 = s.fromArray([-2, -1, 0, 1, 2, 1, 0, -1, -2]);
+            const s2 = s.dropWhile(s1, (i) => i <= 0);
+            return expectExit(s.collectArray(s2), done([1, 2, 1, 0, -1, -2]));
+        });
+    });
+    describe("take", () => {
+        it ("should take elements", () => {
+            const s1 = s.fromArray([1, 2, 3, 4]);
+            const s2 = s.take(s1, 2);
+            return expectExit(s.collectArray(s2), done([1, 2]));
+        });
+        it("should take more elements", () => {
+            const s1 = s.fromArray([1, 2, 3, 4]);
+            const s2 = s.take(s1, 9);
+            return expectExit(s.collectArray(s2), done([1, 2, 3, 4]));
+        });
+    });
+    describe("takeWhile", () => {
+        it("should take elements", () => {
+            const s1 = s.fromArray([-2, -1, 0, 1, 2, -1]);
+            const s2 = s.takeWhile(s1, (i) => i <= 0);
+            return expectExit(s.collectArray(s2), done([-2, -1, 0]));
+        })
+    })
 });

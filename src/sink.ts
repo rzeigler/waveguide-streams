@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { Option, some, none } from "fp-ts/lib/Option";
-import { constant, FunctionN, flow } from "fp-ts/lib/function";
+import { constant, FunctionN, flow, Predicate, identity } from "fp-ts/lib/function";
 import * as wave from "waveguide/lib/io";
 import { DefaultR, RIO } from "waveguide/lib/io";
 import * as cio from "waveguide/lib/console";
@@ -29,7 +29,7 @@ export interface RSink<R, E, S, A0, A, B> {
 }
 
 export interface SinkPure<S, A0, A, B> {
-    readonly initial: SinkStep<A0, S>
+    readonly initial: SinkStep<A0, S>;
     step(state: S, next: A): SinkStep<A0, S>;
     extract(state: S): B;
 }
@@ -101,6 +101,18 @@ export function evalSink<R, E, A>(f: FunctionN<[A], RIO<R, E, unknown>>): RSink<
 
     return { initial, extract, step };
 }
+
+export function drainWhileSink<R, E, A>(f: Predicate<A>): RSink<R, E, Option<A>, never, A, Option<A>> {
+    const initial = sinkCont(none as Option<A>);
+    
+    function step(_state: Option<A>, a: A): SinkStep<never, Option<A>> {
+        return f(a) ? sinkCont(none) : sinkDone(some(a), none);
+    }
+
+    const extract = identity;
+
+    return liftPureSink({ initial, extract, step });
+} 
 
 export function map<R, E, S, A0, A, B, C>(sink: RSink<R, E, S, A0, A, B>, f: FunctionN<[B], C>): RSink<R, E, S, A0, A, C> {
     return {

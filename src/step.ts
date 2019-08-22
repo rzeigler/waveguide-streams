@@ -19,7 +19,7 @@ import { Applicative } from "fp-ts/lib/Applicative";
 
 export enum SinkStepTag { Cont, Done }
 
-export type SinkStep<A0, S> = SinkStepCont<S> | SinkStepDone<A0, S>;
+export type SinkStep<A, S> = SinkStepCont<S> | SinkStepDone<A, S>;
 
 export function sinkCont<S>(s: S): SinkStepCont<S> {
     return { _tag: SinkStepTag.Cont, state: s };
@@ -30,7 +30,7 @@ export interface SinkStepCont<S> {
     readonly state: S;
 }
 
-export function sinkDone<A0, S>(s: S, leftover: Option<A0>): SinkStepDone<A0, S> {
+export function sinkDone<A, S>(s: S, leftover: ReadonlyArray<A>): SinkStepDone<A, S> {
     return { _tag: SinkStepTag.Done, state: s, leftover };
 }
 
@@ -42,18 +42,22 @@ export function isSinkDone<S, A0>(s: SinkStep<S, A0>): s is SinkStepDone<S, A0> 
     return s._tag === SinkStepTag.Done;
 }
 
-export interface SinkStepDone<A0, S> {
+export interface SinkStepDone<A, S> {
     readonly _tag: SinkStepTag.Done;
     readonly state: S;
-    readonly leftover: Option<A0>;
+    readonly leftover: ReadonlyArray<A>;
 }
 
-export function sinkStepLeftover<A0 ,S>(s: SinkStep<A0, S>): Option<A0> {
+export function sinkStepLeftover<A ,S>(s: SinkStep<A, S>): ReadonlyArray<A> {
     if (s._tag === SinkStepTag.Cont) {
-        return none;
+        return [];
     } else {
         return s.leftover;
     }
+}
+
+export function sinkStepState<A0, S>(s: SinkStep<A0, S>): S {
+    return s.state;
 }
 
 export function map<A0, S, S1>(step: SinkStep<A0, S>, f: FunctionN<[S], S1>): SinkStep<A0, S1> {

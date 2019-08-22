@@ -16,24 +16,45 @@ import { Option, some, none } from "fp-ts/lib/Option";
 import { constant, FunctionN, flow, Predicate, identity } from "fp-ts/lib/function";
 import * as wave from "waveguide/lib/io";
 import { DefaultR, RIO } from "waveguide/lib/io";
-import { SinkStep, sinkDone, sinkCont } from "./step";
+import { SinkStep, sinkDone, sinkCont, isSinkDone } from "./step";
+import { ConcurrentQueue } from "waveguide/lib/queue";
 
 
-export interface RSink<R, E, S, A0, A, B> {
-    readonly initial: RIO<R, E, SinkStep<A0, S>>;
-    step(state: S, next: A): RIO<R, E, SinkStep<A0, S>>;
+export interface RSink<R, E, S, A, B> {
+    readonly initial: RIO<R, E, SinkStep<A, S>>;
+    step(state: S, next: A): RIO<R, E, SinkStep<A, S>>;
     extract(step: S): RIO<R, E, B>;
 }
 
-export interface SinkPure<S, A0, A, B> {
-    readonly initial: SinkStep<A0, S>;
-    step(state: S, next: A): SinkStep<A0, S>;
+export interface SinkPure<S, A, B> {
+    readonly initial: SinkStep<A, S>;
+    step(state: S, next: A): SinkStep<A, S>;
     extract(state: S): B;
 }
 
-export type Sink<E, S, A0, A, B> = RSink<DefaultR, E, S, A0, A, B>;
+export type Sink<E, S, A, B> = RSink<DefaultR, E, S, A, B>;
 
-export function liftPureSink<S, A0, A, B>(sink: SinkPure<S, A0, A, B>): Sink<never, S, A0, A, B> {
+/**
+ * Step a sink repeatedly.
+ * If the sink completes before consuming all of the input, then the done state will include the ops leftovers 
+ * and anything left in the array
+ * @param sink 
+ * @param multi 
+ */
+export function stepMany<R, E, S, A, B>(sink: RSink<R, E, S, A, B>, s: S, multi: ReadonlyArray<A>): RIO<R, E, SinkStep<A, S>> {
+    function go(current: SinkStep<A, S>, i: number): RIO<R, E, SinkStep<A, S>> {
+        if (i === multi.length) {
+            return wave.pure(current);
+        } else if (isSinkDone(current)) {
+            return wave.pure(sinkDone(current.state, current.leftover.concat(multi.slice(i))));
+        } else {
+            return wave.chain(sink.step(current.state, multi[i]), (next) => go(next, i + 1));
+        }
+    }
+    return go(sinkCont(s), 0);
+}
+
+export function liftPureSink<S, A, B>(sink: SinkPure<S, A, B>): Sink<never, S, A, B> {
     return {
         initial: wave.pure(sink.initial),
         step: (state: S, next: A) => wave.pure(sink.step(state, next)),
@@ -41,7 +62,7 @@ export function liftPureSink<S, A0, A, B>(sink: SinkPure<S, A0, A, B>): Sink<nev
     };
 }
 
-export function collectArraySink<R, E, A>(): RSink<R, E, A[], never, A, A[]> {
+export function collectArraySink<R, E, A>(): RSink<R, E, A[], A, A[]> {
     const initial =  wave.pure(sinkCont([] as A[]));
 
     function step(state: A[], next: A): RIO<R, E, SinkStep<never, A[]>> {
@@ -51,7 +72,7 @@ export function collectArraySink<R, E, A>(): RSink<R, E, A[], never, A, A[]> {
     return { initial, extract: wave.pure, step };
 }
 
-export function drainSink<R, E, A>(): RSink<R, E, void, never, A, void> {
+export function drainSink<R, E, A>(): RSink<R, E, void, A, void> {
     const initial = wave.pure(sinkCont(undefined));
     const extract = constant(wave.unit);
     function step(_state: void, _next: A): RIO<R, E, SinkStep<never, void>> {
@@ -60,25 +81,25 @@ export function drainSink<R, E, A>(): RSink<R, E, void, never, A, void> {
     return { initial, extract, step };
 }
 
-export function constSink<R, E, A, B>(b: B): RSink<R, E, void, never, A, B> {
-    const initial = wave.pure(sinkDone(undefined as void, none));
+export function constSink<R, E, A, B>(b: B): RSink<R, E, void, A, B> {
+    const initial = wave.pure(sinkDone(undefined as void, []));
     const extract = constant(wave.pure(b));
     function step(_state: void, _next: A): RIO<R, E, SinkStep<never, void>> {
-        return wave.raiseAbort(new Error("constSink step called"));
+        return wave.pure(sinkDone(undefined as void, []));
     }
     return { initial, extract, step };
 }
 
-export function headSink<R, E, A>(): RSink<R, E, Option<A>, never, A, Option<A>> {
+export function headSink<R, E, A>(): RSink<R, E, Option<A>, A, Option<A>> {
     const initial = wave.pure(sinkCont(none));
 
     function step(_state: Option<A>, next: A): RIO<R, E, SinkStep<never, Option<A>>> {
-        return wave.pure(sinkDone(some(next), none));
+        return wave.pure(sinkDone(some(next), []));
     }
     return { initial, extract: wave.pure, step };
 }
 
-export function lastSink<R, E, A>(): RSink<R, E, Option<A>, never, A, Option<A>> {
+export function lastSink<R, E, A>(): RSink<R, E, Option<A>, A, Option<A>> {
     const initial = wave.pure(sinkCont(none));
 
     function step(_state: Option<A>, next: A): RIO<R, E, SinkStep<never, Option<A>>> {
@@ -87,7 +108,7 @@ export function lastSink<R, E, A>(): RSink<R, E, Option<A>, never, A, Option<A>>
     return { initial, extract: wave.pure, step };
 }
 
-export function evalSink<R, E, A>(f: FunctionN<[A], RIO<R, E, unknown>>): RSink<R, E, void, never, A, void> {
+export function evalSink<R, E, A>(f: FunctionN<[A], RIO<R, E, unknown>>): RSink<R, E, void, A, void> {
     const initial = wave.pure(sinkCont(undefined as void));
 
     function step(_state: void, next: A): RIO<R, E, SinkStep<never, void>> {
@@ -99,11 +120,11 @@ export function evalSink<R, E, A>(f: FunctionN<[A], RIO<R, E, unknown>>): RSink<
     return { initial, extract, step };
 }
 
-export function drainWhileSink<R, E, A>(f: Predicate<A>): RSink<R, E, Option<A>, never, A, Option<A>> {
+export function drainWhileSink<R, E, A>(f: Predicate<A>): RSink<R, E, Option<A>, A, Option<A>> {
     const initial = sinkCont(none as Option<A>);
     
     function step(_state: Option<A>, a: A): SinkStep<never, Option<A>> {
-        return f(a) ? sinkCont(none) : sinkDone(some(a), none);
+        return f(a) ? sinkCont(none) : sinkDone(some(a), []);
     }
 
     const extract = identity;
@@ -111,7 +132,19 @@ export function drainWhileSink<R, E, A>(f: Predicate<A>): RSink<R, E, Option<A>,
     return liftPureSink({ initial, extract, step });
 } 
 
-export function map<R, E, S, A0, A, B, C>(sink: RSink<R, E, S, A0, A, B>, f: FunctionN<[B], C>): RSink<R, E, S, A0, A, C> {
+export function queueSink<R, E, A>(queue: ConcurrentQueue<A>): RSink<R, E, void, A, void> {
+    const initial = wave.pure(sinkCont(undefined));
+
+    function step(_state: void, a: A): RIO<R, E, SinkStep<A, void>> {
+        return wave.as(queue.offer(a), sinkCont(undefined));
+    }
+
+    const extract = constant(wave.unit);
+    return { initial, extract, step };
+}
+
+
+export function map<R, E, S, A, B, C>(sink: RSink<R, E, S, A, B>, f: FunctionN<[B], C>): RSink<R, E, S, A, C> {
     return {
         ...sink,
         extract: flow(sink.extract, wave.mapWith(f))

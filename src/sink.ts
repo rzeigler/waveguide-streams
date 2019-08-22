@@ -16,10 +16,7 @@ import { Option, some, none } from "fp-ts/lib/Option";
 import { constant, FunctionN, flow, Predicate, identity } from "fp-ts/lib/function";
 import * as wave from "waveguide/lib/io";
 import { DefaultR, RIO } from "waveguide/lib/io";
-import * as cio from "waveguide/lib/console";
-import { SinkStep, sinkDone, sinkCont, traverse as stepTraverse } from "./step";
-import { pipe } from "fp-ts/lib/pipeable";
-import { Applicative } from "fp-ts/lib/Applicative";
+import { SinkStep, sinkDone, sinkCont } from "./step";
 
 
 export interface RSink<R, E, S, A0, A, B> {
@@ -57,7 +54,7 @@ export function collectArraySink<R, E, A>(): RSink<R, E, A[], never, A, A[]> {
 export function drainSink<R, E, A>(): RSink<R, E, void, never, A, void> {
     const initial = wave.pure(sinkCont(undefined));
     const extract = constant(wave.unit);
-    function step(state: void, next: A): RIO<R, E, SinkStep<never, void>> {
+    function step(_state: void, _next: A): RIO<R, E, SinkStep<never, void>> {
         return wave.pure(sinkCont(undefined));
     }
     return { initial, extract, step };
@@ -66,7 +63,7 @@ export function drainSink<R, E, A>(): RSink<R, E, void, never, A, void> {
 export function constSink<R, E, A, B>(b: B): RSink<R, E, void, never, A, B> {
     const initial = wave.pure(sinkDone(undefined as void, none));
     const extract = constant(wave.pure(b));
-    function step(state: void, next: A): RIO<R, E, SinkStep<never, void>> {
+    function step(_state: void, _next: A): RIO<R, E, SinkStep<never, void>> {
         return wave.raiseAbort(new Error("constSink step called"));
     }
     return { initial, extract, step };
@@ -119,10 +116,4 @@ export function map<R, E, S, A0, A, B, C>(sink: RSink<R, E, S, A0, A, B>, f: Fun
         ...sink,
         extract: flow(sink.extract, wave.mapWith(f))
     }
-}
-
-export function chain<R, E, S, A0, A, B, C>(sink: RSink<R, E, S, A0, A, B>, f: FunctionN<[B], RSink<R, E, S, A0, A, C>>): RSink<R, E, S, A0, A, C> {
-    const initial = sink.initial;
-
-    throw new Error();
 }

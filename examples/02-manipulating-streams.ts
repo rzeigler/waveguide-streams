@@ -13,11 +13,10 @@
 // limitations under the License.
 
 import { log } from "./common";
-import * as s from "../src";
+import * as s from "../src/stream";
 import { IO } from "waveguide/lib/io";
 import * as wave from "waveguide/lib/io";
 import { array } from "fp-ts/lib/Array";
-import { flow } from "fp-ts/lib/function";
 
 /**
  * Streams have many combinators that can be used to manipulate them
@@ -53,7 +52,7 @@ function randomM(n: number): IO<never, number> {
     );
 }
 
-const ras = s.mapEncaseRIO(as, randomM);
+const ras = s.mapM(as, randomM);
 
 wave.runR(array.sequence(wave.instances)([
     log(s.collectArray(as)),

@@ -19,11 +19,7 @@ import * as cio from "waveguide/lib/console";
 import { Stream } from "../src/stream";
 import { IO } from "waveguide/lib/io";
 import * as wave from "waveguide/lib/io";
-import { Readable } from "stream";
-import { Do } from "fp-ts-contrib/lib/Do";
 import * as resource from "waveguide/lib/resource";
-import * as deferred from "waveguide/lib/deferred";
-import { pipe } from "fp-ts/lib/pipeable";
 import { open, read } from "./common";
 import { Resource } from "waveguide/lib/resource";
 

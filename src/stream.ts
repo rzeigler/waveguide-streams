@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Option, some, none, option } from "fp-ts/lib/Option";
+import { Option, some, none } from "fp-ts/lib/Option";
 import * as o from "fp-ts/lib/Option";
 import { FunctionN, Predicate, Lazy, constant } from "fp-ts/lib/function";
 import { pipe } from "fp-ts/lib/pipeable";
-import { flow } from "fp-ts/lib/function";
-import { head as arrayHead } from "fp-ts/lib/Array";
 import * as wave from "waveguide/lib/io";
 import { RIO, DefaultR } from "waveguide/lib/io";
 import * as resource from "waveguide/lib/resource";

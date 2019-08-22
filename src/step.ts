@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { HKT, URIS3, HKT3 } from "fp-ts/lib/HKT";
+import { HKT } from "fp-ts/lib/HKT";
 import { Option, none } from "fp-ts/lib/Option";
 import { FunctionN } from "fp-ts/lib/function";
-import { Applicative, Applicative3 } from "fp-ts/lib/Applicative";
+import { Applicative } from "fp-ts/lib/Applicative";
 
 export enum SinkStepTag { Cont, Done }
 

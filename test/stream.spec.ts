@@ -15,16 +15,15 @@
 import * as s from "../src/stream";
 import { Stream } from "../src/stream";
 import * as ref from "waveguide/lib/ref";
-import { done, raise } from "waveguide/lib/exit";
-import * as wave from "waveguide/lib/io";
+import { done } from "waveguide/lib/exit";
 import * as resource from "waveguide/lib/resource";
 import { expectExit } from "./tools.spec";
 import { pipe } from "fp-ts/lib/pipeable";
 import { Option, none, some } from "fp-ts/lib/Option";
 import { RSink, liftPureSink } from "../src/sink";
 import * as sink from "../src/sink";
-import { DefaultR, RIO } from "waveguide/lib/io";
-import { SinkStep, sinkCont, sinkDone, } from "../src/step";
+import { DefaultR } from "waveguide/lib/io";
+import { SinkStep, sinkDone, sinkCont } from "../src/step";
 
 describe("streams", () => {
     describe("empty", () => {

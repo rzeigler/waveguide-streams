@@ -13,6 +13,8 @@
 // limitations under the License.
 
 import { some, none, option } from "fp-ts/lib/Option";
+import { monoidString } from "fp-ts/lib/Monoid";
+import { intercalate } from "fp-ts/lib/Foldable";
 import * as opt from "fp-ts/lib/Option";
 import { Stream } from "../src/stream";
 import * as stream from "../src/stream";
@@ -24,7 +26,7 @@ import * as resource from "waveguide/lib/resource";
 import * as wave from "waveguide/lib/io";
 import * as cio from "waveguide/lib/console";
 import { pipe } from "fp-ts/lib/pipeable";
-import { reduce as arrayReduce, zipWith as arrayZipWith} from "fp-ts/lib/Array";
+import { zipWith as arrayZipWith, array} from "fp-ts/lib/Array";
 
 
 /**
@@ -74,7 +76,7 @@ function splitSink<R, E>(split: string): snk.Sink<E, SplitState, string, string[
     return snk.liftPureSink({initial, extract, step});
 }
 
-function csvFileToCells(path: string) {
+function csvFileToParsedJson(path: string) {
     const fd = common.open(path, "r");
     const source = resource.map(fd, (h) => {
         const doRead = common.read(h, 120);
@@ -91,22 +93,18 @@ function csvFileToCells(path: string) {
     const lines: Stream<NodeJS.ErrnoException, string> = 
         stream.chain(stream.transduce(text, splitSink("\n")), (a) => stream.fromArray(a) as Stream<NodeJS.ErrnoException, string>);
 
-    const headerAndBody = 
-        stream.mapM(
-            stream.peel(lines, snk.headSink()),
-            ([header, body]) => {
-                return wave.map(stream.collectArray(body), (lines) => [header, lines] as const)
-            }
-        )
+    const headerAndBody = stream.peel(lines, snk.map(snk.headSink(), o => pipe(o, opt.getOrElse(() => ""))));
     
-    return headerAndBody;
+    const jsonRecords = 
+        stream.chain(headerAndBody, ([header, rest]) => {
+            const parser = makeLineParser(header);
+            return stream.map(rest, parser);
+        })
 
-    // const cells = stream.transduce(stream.drop(lines, 1), splitSink(","));
-
-    // return stream.map(cells, (c) => parseInt(c));
+    return jsonRecords;
 }
 
-const cells = csvFileToCells("examples/csv/Demographic_Statistics_By_Zip_Code.csv");
+const cells = csvFileToParsedJson("examples/csv/Demographic_Statistics_By_Zip_Code.csv");
 
 
 const io = stream.into(cells, snk.evalSink(cio.log));
@@ -114,13 +112,10 @@ const io = stream.into(cells, snk.evalSink(cio.log));
 wave.runR(io, {}, (o) => console.log(o));
 
 
-function makeLineParser(header: string): (row: string) => {[k: string]: string} {
+function makeLineParser(header: string): (row: string) => string {
     const cols = header.split(",");
     return (s) => {
         const split = s.split(",");
-        return pipe(
-                arrayZipWith(cols, split, (k, v) => ({[k]: v})),
-                arrayReduce({}, (s, v) => ({...s, v}))
-            );
+        return  intercalate(monoidString, array)(",", arrayZipWith(cols, split, (k, v) => `${k}=${v}`));
     }
 }

@@ -143,7 +143,6 @@ export function queueSink<R, E, A>(queue: ConcurrentQueue<A>): RSink<R, E, void,
     return { initial, extract, step };
 }
 
-
 export function map<R, E, S, A, B, C>(sink: RSink<R, E, S, A, B>, f: FunctionN<[B], C>): RSink<R, E, S, A, C> {
     return {
         ...sink,

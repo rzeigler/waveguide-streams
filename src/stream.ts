@@ -25,6 +25,7 @@ import { ConcurrentQueue } from "waveguide/lib/queue";
 import * as cq from "waveguide/lib/queue";
 import { RSink, collectArraySink, drainSink, drainWhileSink, stepMany, queueSink } from "./sink";
 import { isSinkCont, SinkStep, isSinkDone, sinkStepLeftover, sinkStepState } from "./step";
+import { ExitTag } from "waveguide/lib/exit";
 
 export type Source<R, E, A> = RIO<R, E, Option<A>>
 
@@ -33,30 +34,6 @@ export type Fold<R, E, A> = <S>(initial: S, cont: Predicate<S>, step: FunctionN<
 export type RStream<R, E, A> = Managed<R, E, Fold<R, E, A>>;
 
 export type Stream<E, A> = RStream<DefaultR, E, A>;
-
-// function sourceFold<R, E, A>(pull: Source<R, E, A>): Fold<R, E, A> {
-//     return resource.sus
-//     return <S>(initial: S, cont: Predicate<S>, f: FunctionN<[S, A], RIO<R, E, S>>) => {
-//         function step(current: S): RIO<R, E, S> {
-//             if (!cont(initial)) {
-//                 return wave.pure(current);
-//             }
-//             return pipe(
-//                 pull,
-//                 wave.chainWith((optA) =>
-//                     pipe(
-//                         optA,
-//                         o.fold(
-//                             () => wave.pure(current) as RIO<R, E, S>,
-//                             (a) => wave.chain(f(current, a), step)
-//                         )
-//                     )
-//                 )
-//             )
-//         }
-//         return step(initial);
-//     }
-// }
 
 // The contract of a Stream's fold is that state is preserved within the lifecycle of the managed
 // Therefore, we must track the offset in the array via a ref 
@@ -172,9 +149,7 @@ export const empty: Stream<never, never> =
     resource.pure(<S>(initial: S, _cont: Predicate<S>, _f: FunctionN<[S, never], RIO<DefaultR, never, S>>) =>
         wave.pure(initial));
 
-export const never: Stream<never, never> =
-    resource.pure(<S>(_initial: S, _cont: Predicate<S>, _f: FunctionN<[S, never], RIO<DefaultR, never, S>>) =>
-        wave.never);
+export const never: Stream<never, never> = mapM(once(undefined), constant(wave.never));
 
 export function fromOption<A>(opt: Option<A>): Stream<never, A> {
     return pipe(
@@ -406,27 +381,100 @@ export function transduce<R, E, A, S, B>(stream: RStream<R, E, A>, sink: RSink<R
     );
 }
 
+enum StepTag {
+    Value,
+    End,
+    Error,
+    Abort
+}
+
+export interface StepValue<E, A> {
+    _tag: StepTag.Value;
+    a: A;
+}
+
+export function stepValue<A>(a: A): Step<never, A> {
+    return { _tag: StepTag.Value, a };
+}
+
+export interface StepError<E, A> {
+    _tag: StepTag.Error;
+    e: E;
+}
+
+export function stepError<E>(e: E): Step<E, never> {
+    return { _tag: StepTag.Error, e };
+}
+
+export interface StepAbort<E, A> {
+    _tag: StepTag.Abort;
+    e: unknown;
+}
+
+export function stepAbort(e: unknown): Step<never, never> {
+    return { _tag: StepTag.Abort, e };
+}
+
+export interface StepEnd<E, A> {
+    _tag: StepTag.End;
+}
+
+export const stepEnd: Step<never, never> = { _tag: StepTag.End };
+
+export type Step<E, A> = StepValue<E, A> | StepError<E, A> | StepEnd<E, A> | StepAbort<E, A>;
+
 export function peel<R, E, A, S, B>(stream: RStream<R, E, A>, sink: RSink<R, E, S, A, B>): RStream<R, E, readonly [B, RStream<R, E, A>]> {
-    return resource.map(
-        stream,
-        (fold) =>
-            <S0>(initial: S0, cont: Predicate<S0>, step: FunctionN<[S0, readonly [B, RStream<R, E, A>]], RIO<R, E, S0>>): RIO<R, E, S0> => {
-                if (cont(initial)) {
-                    console.log("initial", initial)
-                    // Drive the inner fold once
-                    return pipe(
-                        // alas this doesn't work when composing transducers
-                        // because any leftovers from the transduction step are apparently lost by doing this
-                        intoLeftover(resource.pure(fold), sink), 
-                        wave.chainWith(([b, left]) => {
-                            return step(initial, [b, concat(fromArray(left) as RStream<R, E, A>, resource.pure(fold))])
-                        })
-                    )
+    // unfortunately, peel doesn't seem to compose nicely with transducers that push back leftovers
+    // So, the solution is to run the input stream in the background into a queue to ensure that we get the correct output
+    // We must also account for stream errors as well
+    // Also, we have to upcast, because contravariance
+    const intoQueue: Managed<R, E, ConcurrentQueue<Step<E, A>>> = pipe(
+        resource.encaseRIO(cq.boundedQueue<Step<E, A>>(1)),
+        resource.chainWith((q) => {
+          const writer = into(map(stream, stepValue) as RStream<R, E, Step<E, A>>, queueSink(q));   
+          return pipe(
+              resource.fiber(writer),
+              resource.chainWith((writerFiber) => {
+                const listener = wave.chain(writerFiber.wait, (exit) => {
+                    if (exit._tag === ExitTag.Done || exit._tag === ExitTag.Interrupt) {
+                        return q.offer(stepEnd);
+                    } else if (exit._tag === ExitTag.Raise) {
+                        return q.offer(stepError(exit.error));
+                    } else {
+                        return q.offer(stepAbort(exit.abortedWith));
+                    }
+                })
+                return resource.as(resource.fiber(listener), q);
+              })
+          );
+        })
+    );
+
+    const source: Managed<R, E, RIO<R, E, Option<A>>> = resource.map(intoQueue, (q) => 
+        pipe(
+            q.take,
+            wave.chainWith((step) => {
+                if (step._tag === StepTag.Value) {
+                    return wave.pure(some(step.a));
+                } else if (step._tag === StepTag.End) {
+                    return wave.pure(none);
+                } else if (step._tag === StepTag.Error) {
+                    return wave.raiseError(step.e);
                 } else {
-                    return wave.pure(initial);
+                    return wave.raiseAbort(step.e);
                 }
-            }
-    )
+            })
+        )
+    );
+
+    return resource.chain(source, (pull) => {
+        const pullStream = fromSource(resource.pure(pull));
+        // We now have a shared pull instantiation that we can use as a sink to drive and return as a stream
+        return pipe(
+            encase(intoLeftover(pullStream, sink)),
+            mapWith(([b, left]) => [b, concat(fromArray(left) as RStream<R, E, A>, pullStream)] as const)
+        )
+    });
 }
 
 export function drop<R, E, A>(stream: RStream<R, E, A>, n: number): RStream<R, E, A> {
@@ -483,8 +531,6 @@ export function into<R, E, A, S, B>(stream: RStream<R, E, A>, sink: RSink<R, E, 
         )
     )
 }
-
-import * as cio from "waveguide/lib/console";
 
 export function intoLeftover<R, E, A, S, B>(stream: RStream<R, E, A>, sink: RSink<R, E, S, A, B>): RIO<R, E, readonly [B, ReadonlyArray<A>]> {
     return resource.use(stream, (fold) =>

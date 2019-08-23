@@ -76,7 +76,7 @@ function splitSink<R, E>(split: string): snk.Sink<E, SplitState, string, string[
     return snk.liftPureSink({initial, extract, step});
 }
 
-function csvFileToParsedJson(path: string) {
+function csvFileLabelled(path: string) {
     const fd = common.open(path, "r");
     const source = resource.map(fd, (h) => {
         const doRead = common.read(h, 120);
@@ -104,7 +104,7 @@ function csvFileToParsedJson(path: string) {
     return jsonRecords;
 }
 
-const cells = csvFileToParsedJson("examples/csv/Demographic_Statistics_By_Zip_Code.csv");
+const cells = csvFileLabelled("examples/csv/Demographic_Statistics_By_Zip_Code.csv");
 
 
 const io = stream.into(cells, snk.evalSink(cio.log));

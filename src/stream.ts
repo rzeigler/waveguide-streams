@@ -27,6 +27,7 @@ import { RSink, collectArraySink, drainSink, drainWhileSink, stepMany, queueSink
 import { isSinkCont, SinkStep, isSinkDone, sinkStepLeftover, sinkStepState } from "./step";
 import { ExitTag } from "waveguide/lib/exit";
 import { Fiber } from "waveguide/lib/fiber";
+import { Monad } from "fp-ts/lib/Monad";
 
 export type Source<R, E, A> = RIO<R, E, Option<A>>
 
@@ -565,4 +566,3 @@ export function collectArray<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, A[]> 
 export function drain<R, E, A>(stream: RStream<R, E, A>): RIO<R, E, void> {
     return into(stream, drainSink());
 }
-

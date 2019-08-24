@@ -43,7 +43,7 @@
     "chai": "^4.2.0",
     "chai-as-promised": "^7.1.1",
     "deep-equal": "^1.0.1",
-    "docs-ts": "0.1.0",
+    "docs-ts": "^0.1.0",
     "doctoc": "^1.4.0",
     "eslint": "^5.0.0",
     "esm": "^3.2.5",

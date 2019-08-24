@@ -2,7 +2,7 @@
 <img src="logo/logotype.svg" width=50%>
 </h1>
 
-# waveguide
+# waveguide streams
 
 [![npm version](https://img.shields.io/npm/v/waveguide-streams)](https://img.shields.io/npm/v/waveguide-streams)
 [![npm version next](https://img.shields.io/npm/v/waveguide-streams/next)](https://img.shields.io/npm/v/waveguide-streams/next)

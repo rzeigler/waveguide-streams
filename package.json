@@ -57,13 +57,13 @@
     "source-map-support": "^0.5.10",
     "ts-node": "^8.1.0",
     "typescript": "^3.5.2",
-    "waveguide": "1.0.0-12"
+    "waveguide": "1.0.0-14"
   },
   "dependencies": {
     "fp-ts-contrib": "^0.1.2"
   },
   "peerDependencies": {
     "fp-ts": "^2.0.0",
-    "waveguide": "1.0.0-12"
+    "waveguide": "1.0.0-14"
   }
 }

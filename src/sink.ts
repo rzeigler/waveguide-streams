@@ -112,7 +112,7 @@ export function evalSink<R, E, A>(f: FunctionN<[A], RIO<R, E, unknown>>): RSink<
     const initial = wave.pure(sinkCont(undefined as void));
 
     function step(_state: void, next: A): RIO<R, E, SinkStep<never, void>> {
-        return wave.applySecond(f(next), wave.pure(sinkCont(_state)));
+        return wave.applySecond(f(next), wave.pure(sinkCont(_state)) as RIO<R, E, SinkStep<never, void>>);
     }
 
     const extract = constant(wave.unit)

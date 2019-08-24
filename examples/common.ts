@@ -61,9 +61,9 @@ export const open = (path: string, flags: string): Resource<NodeJS.ErrnoExceptio
 /**
  * We can also use a file handle to write content
  */
-export const write = (handle: number, content: Buffer, ct: number): IO<NodeJS.ErrnoException, number> => wave.uninterruptible(
+export const write = (handle: number, data: string): IO<NodeJS.ErrnoException, number> => wave.uninterruptible(
     wave.async((callback) => {
-        fs.write(handle, content, 0, ct, (err, written) => {
+        fs.write(handle, data, (err, written) => {
             if (err) {
                 callback(left(err))
             } else {

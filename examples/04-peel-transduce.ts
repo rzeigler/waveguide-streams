@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { some, none, option } from "fp-ts/lib/Option";
+import { some, none } from "fp-ts/lib/Option";
 import { monoidString } from "fp-ts/lib/Monoid";
 import { intercalate } from "fp-ts/lib/Foldable";
 import * as opt from "fp-ts/lib/Option";
@@ -24,7 +24,6 @@ import * as common from "./common";
 import { Resource } from "waveguide/lib/resource";
 import * as resource from "waveguide/lib/resource";
 import * as wave from "waveguide/lib/io";
-import * as cio from "waveguide/lib/console";
 import { pipe } from "fp-ts/lib/pipeable";
 import { zipWith as arrayZipWith, array} from "fp-ts/lib/Array";
 import { Sink } from "../src/sink";
@@ -40,7 +39,7 @@ import { Sink } from "../src/sink";
  * Transducers need an initial state, a step function, and an extract function
  */
 
- /**
+/**
   * Here we define a transducer that will extract chunks of lines when fed strings.
   * This is important for processing the lines of the csv
   */
@@ -122,6 +121,15 @@ function csvFileLabelled(path: string): Stream<NodeJS.ErrnoException, string> {
     /**
      * Here we use the header of the file and the remainder of the stream to emit lines where each row has been labelled
      */
+
+    function makeLineParser(header: string): (row: string) => string {
+        const cols = header.split(",");
+        return (s) => {
+            const split = s.split(",");
+            return  intercalate(monoidString, array)(",", arrayZipWith(cols, split, (k, v) => `${k}=${v}`));
+        }
+    }
+
     const jsonRecords = 
         stream.chain(headerAndBody, ([header, rest]) => {
             const parser = makeLineParser(header);
@@ -156,13 +164,4 @@ export function writeFile(path: string): Resource<NodeJS.ErrnoException, Sink<No
  */
 const io = stream.intoManaged(outLines, writeFile("examples/csv/Demographic_Statistics_By_Zip_Code.txt"));
 
-wave.runR(io, {}, (o) => console.log(o));
-
-
-function makeLineParser(header: string): (row: string) => string {
-    const cols = header.split(",");
-    return (s) => {
-        const split = s.split(",");
-        return  intercalate(monoidString, array)(",", arrayZipWith(cols, split, (k, v) => `${k}=${v}`));
-    }
-}
+wave.runR(io, {});

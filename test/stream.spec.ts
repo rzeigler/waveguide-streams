@@ -200,7 +200,7 @@ describe("streams", () => {
                 s.chain(s.peel(s2, multiplier),
                     ([head, rest]) => { // head is 4
                         return s.map(rest, (v) => v * head)  // emits 24 32
-                });
+                    });
             return expectExit(s.collectArray(s3), done([24, 32]));
         });
     });
@@ -240,6 +240,11 @@ describe("streams", () => {
             const s2 = s.take(s1, 9);
             return expectExit(s.collectArray(s2), done([1, 2, 3, 4]));
         });
+        it("should make infinite streams finite", () => {
+            const s1 = s.repeatedly(1);
+            const s2 = s.take(s1, 3);
+            return expectExit(s.collectArray(s2), done([1, 1, 1]));
+        })
     });
     describe("takeWhile", () => {
         it("should take elements", () => {

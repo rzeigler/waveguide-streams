@@ -13,9 +13,8 @@
 // limitations under the License.
 
 import { HKT } from "fp-ts/lib/HKT";
-import { Option, none } from "fp-ts/lib/Option";
-import { FunctionN } from "fp-ts/lib/function";
 import { Applicative } from "fp-ts/lib/Applicative";
+import { FunctionN } from "fp-ts/lib/function";
 
 export enum SinkStepTag { Cont, Done }
 
@@ -30,7 +29,7 @@ export interface SinkStepCont<S> {
     readonly state: S;
 }
 
-export function sinkDone<A, S>(s: S, leftover: ReadonlyArray<A>): SinkStepDone<A, S> {
+export function sinkDone<A, S>(s: S, leftover: readonly A[]): SinkStepDone<A, S> {
     return { _tag: SinkStepTag.Done, state: s, leftover };
 }
 
@@ -45,10 +44,10 @@ export function isSinkDone<S, A0>(s: SinkStep<S, A0>): s is SinkStepDone<S, A0> 
 export interface SinkStepDone<A, S> {
     readonly _tag: SinkStepTag.Done;
     readonly state: S;
-    readonly leftover: ReadonlyArray<A>;
+    readonly leftover: readonly A[];
 }
 
-export function sinkStepLeftover<A ,S>(s: SinkStep<A, S>): ReadonlyArray<A> {
+export function sinkStepLeftover<A ,S>(s: SinkStep<A, S>): readonly A[] {
     if (s._tag === SinkStepTag.Cont) {
         return [];
     } else {

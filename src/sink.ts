@@ -41,7 +41,7 @@ export type Sink<E, S, A, B> = RSink<DefaultR, E, S, A, B>;
  * @param sink 
  * @param multi 
  */
-export function stepMany<R, E, S, A, B>(sink: RSink<R, E, S, A, B>, s: S, multi: ReadonlyArray<A>): RIO<R, E, SinkStep<A, S>> {
+export function stepMany<R, E, S, A, B>(sink: RSink<R, E, S, A, B>, s: S, multi: readonly A[]): RIO<R, E, SinkStep<A, S>> {
     function go(current: SinkStep<A, S>, i: number): RIO<R, E, SinkStep<A, S>> {
         if (i === multi.length) {
             return wave.pure(current);

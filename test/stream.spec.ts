@@ -16,13 +16,12 @@ import * as s from "../src/stream";
 import { Stream } from "../src/stream";
 import * as ref from "waveguide/lib/ref";
 import { done } from "waveguide/lib/exit";
-import * as resource from "waveguide/lib/resource";
+import * as managed from "waveguide/lib/managed";
 import { expectExit } from "./tools.spec";
 import { pipe } from "fp-ts/lib/pipeable";
 import { Option, none, some } from "fp-ts/lib/Option";
-import { RSink, liftPureSink, Sink } from "../src/sink";
+import { Sink, liftPureSink } from "../src/sink";
 import * as sink from "../src/sink";
-import { DefaultR } from "waveguide/lib/io";
 import { SinkStep, sinkDone, sinkCont } from "../src/step";
 
 describe("streams", () => {
@@ -66,8 +65,8 @@ describe("streams", () => {
         it("should construct a stream from a source", () => {
             const source =
                 pipe(
-                    resource.encaseRIO(ref.makeRef([1, 2, 3])),
-                    resource.mapWith((cell) =>
+                    managed.encaseWave(ref.makeRef([1, 2, 3])),
+                    managed.mapWith((cell) =>
                         cell.modify((as) => {
                             return as.length === 0 ?
                                 [none as Option<number>, as] as const : [some(as[0]), as.slice(1, as.length)] as const;
@@ -121,7 +120,7 @@ describe("streams", () => {
         // The transducer used for the test is a summer
         // i.e. it consumes the number of elements to read, then that number of elements, and then outputs the sum
 
-        function transducer(): RSink<DefaultR, never, readonly [number, number], number, number> {
+        function transducer(): Sink<never, readonly [number, number], number, number> {
             const initial = sinkCont([-1, 0] as const);
             
             function step(state: readonly [number, number], next: number): SinkStep<never, readonly [number, number]> {
@@ -183,7 +182,7 @@ describe("streams", () => {
         })
     });
     describe("peel", () => {
-        const multiplier = sink.map(sink.headSink<DefaultR, never, number>(), (opt) => opt._tag === "Some" ? opt.value : 1);
+        const multiplier = sink.map(sink.headSink<never, number>(), (opt) => opt._tag === "Some" ? opt.value : 1);
         it("should extract a head and return a subsequent element", () => {
             const s1 = s.fromArray([2, 6, 9])
             const s2 =  
@@ -251,6 +250,14 @@ describe("streams", () => {
             const s1 = s.fromArray([-2, -1, 0, 1, 2, -1]);
             const s2 = s.takeWhile(s1, (i) => i <= 0);
             return expectExit(s.collectArray(s2), done([-2, -1, 0]));
+        })
+    })
+    describe("zip", () => {
+        it("should zip maxing at the shorter length", () => {
+            const s1 = s.fromRange(0);
+            const s2 = s.fromRange(0, 1, 4);
+            const s3 = s.zip(s1, s2);
+            return expectExit(s.collectArray(s3), done([[0, 0], [1, 1], [2, 2], [3, 3], [4, 4]]));
         })
     })
 });

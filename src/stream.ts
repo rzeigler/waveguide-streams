@@ -14,7 +14,7 @@
 
 import { Option, some, none } from "fp-ts/lib/Option";
 import * as o from "fp-ts/lib/Option";
-import { FunctionN, Predicate, Lazy, constant } from "fp-ts/lib/function";
+import { FunctionN, Predicate, Lazy, constant, identity } from "fp-ts/lib/function";
 import { pipe } from "fp-ts/lib/pipeable";
 import * as wave from "waveguide/lib/wave";
 import { Wave } from "waveguide/lib/wave";
@@ -35,7 +35,6 @@ export type Source<E, A> = Wave<E, Option<A>>
 export type Fold<E, A> = <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], Wave<E, S>>) => Wave<E, S>
 
 export type Stream<E, A> = Managed<E, Fold<E, A>>;
-
 
 // The contract of a Stream's fold is that state is preserved within the lifecycle of the managed
 // Therefore, we must track the offset in the array via a ref 
@@ -150,6 +149,14 @@ export function repeatedly<A>(a: A): Stream<never, A> {
 export const empty: Stream<never, never> =
     managed.pure(<S>(initial: S, _cont: Predicate<S>, _f: FunctionN<[S, never], Wave<never, S>>) =>
         wave.pure(initial));
+
+export function raised<E>(e: E): Stream<E, never> {
+    return encaseWave(wave.raiseError(e))
+}
+
+export function aborted(e: unknown): Stream<never, never> {
+    return encaseWave(wave.raiseAbort(e));
+}
 
 export function fromOption<A>(opt: Option<A>): Stream<never, A> {
     return pipe(
@@ -305,6 +312,10 @@ export function chain<E, A, B>(stream: Stream<E, A>, f: FunctionN<[A], Stream<E,
                 return wave.pure(s);
             })
     )
+}
+
+export function flatten<E, A>(stream: Stream<E, Stream<E, A>>): Stream<E, A> {
+    return chain(stream, identity);
 }
 
 export function encaseWave<E, A>(rio: Wave<E, A>): Stream<E, A> {

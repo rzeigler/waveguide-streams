@@ -146,6 +146,19 @@ export function repeatedly<A>(a: A): Stream<never, A> {
     return managed.pure(fold);
 }
 
+export function periodically(ms: number): Stream<never, number> {
+    return pipe(
+        managed.encaseWave(ref.makeRef(-1)),
+        managed.mapWith((r) => 
+            pipe(
+                wave.delay(r.update((n) => n + 1), ms),
+                wave.mapWith((n) => some(n))
+            )
+        ),
+        fromSource
+    )
+}
+
 export const empty: Stream<never, never> =
     managed.pure(<S>(initial: S, _cont: Predicate<S>, _f: FunctionN<[S, never], Wave<never, S>>) =>
         wave.pure(initial));

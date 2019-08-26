@@ -14,8 +14,8 @@
 
 import { log } from "./common";
 import * as s from "../src/stream";
-import { IO } from "waveguide/lib/io";
-import * as wave from "waveguide/lib/io";
+import { Wave } from "waveguide/lib/wave";
+import * as wave from "waveguide/lib/wave";
 import { array } from "fp-ts/lib/Array";
 
 /**
@@ -45,7 +45,7 @@ const basi = s.zipWithIndex(as);
 /**
  * We can effectfully map over them
  */
-function randomM(n: number): IO<never, number> {
+function randomM(n: number): Wave<never, number> {
     return wave.map(
         wave.sync(() => Math.random()),
         (i) => i * n
@@ -54,11 +54,11 @@ function randomM(n: number): IO<never, number> {
 
 const ras = s.mapM(as, randomM);
 
-wave.runR(array.sequence(wave.instances)([
+wave.run(array.sequence(wave.instances)([
     log(s.collectArray(as)),
     log(s.collectArray(nas)),
     log(s.collectArray(bas)),
     log(s.collectArray(bas)),
     log(s.collectArray(basi)),
     log(s.collectArray(ras))]
-), {})
+))

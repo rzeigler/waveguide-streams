@@ -14,13 +14,13 @@
 
 import { array } from "fp-ts/lib/Array";
 import * as cio from "waveguide/lib/console";
-import * as s from "../src";
-import { Stream } from "../src";
-import { IO } from "waveguide/lib/io";
-import * as wave from "waveguide/lib/io";
+import * as s from "../src/stream";
+import { Stream } from "../src/stream";
+import { Wave } from "waveguide/lib/wave";
+import * as wave from "waveguide/lib/wave";
 
 // A nice helper for logging
-function log<E, A>(tag: string, io: IO<E, A>): IO<E, void> {
+function log<E, A>(tag: string, io: Wave<E, A>): Wave<E, void> {
     return wave.chain(io, (a) => cio.log(tag, a));
 }
 
@@ -53,18 +53,18 @@ const bs: Stream<never, number>  = s.fromIterator(function* (): Iterator<number>
  * Its merely a description of the stream.
  * First we must compile the stream using a collection strategy
  */
-const a_: IO<never, number[]> = s.collectArray(a);
+const a_: Wave<never, number[]> = s.collectArray(a);
 
-const as_: IO<never, number[]> = s.collectArray(as);
+const as_: Wave<never, number[]> = s.collectArray(as);
 
 /**
  * We can also compile a stream to run for just its effects
  * 
  */
-const bs_: IO<never, void> = s.drain(bs);
+const bs_: Wave<never, void> = s.drain(bs);
 
-wave.runR(array.sequence(wave.instances)([
+wave.run(array.sequence(wave.instances)([
     log("once", a_),
     log("from array", as_),
     log("from iterator drained", bs_)
-]), {});
+]));

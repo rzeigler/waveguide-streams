@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { IO } from "waveguide/lib/io";
-import * as wave from "waveguide/lib/io";
+import { Wave } from "waveguide/lib/wave";
+import * as wave from "waveguide/lib/wave";
 import * as cio from "waveguide/lib/console";
-import * as resource from "waveguide/lib/resource";
-import { Resource } from "waveguide/lib/resource";
+import * as managed from "waveguide/lib/managed";
+import { Managed } from "waveguide/lib/managed";
 import * as fs from "fs";
 import { left, right } from "fp-ts/lib/Either";
 
 // A nice helper for logging
-export function log<E, A>(io: IO<E, A>): IO<E, void> {
+export function log<E, A>(io: Wave<E, A>): Wave<E, void> {
     return wave.chain(io, cio.log);
 }
 
-export const openFile = (path: string, flags: string): IO<NodeJS.ErrnoException, number> => wave.uninterruptible(
+export const openFile = (path: string, flags: string): Wave<NodeJS.ErrnoException, number> => wave.uninterruptible(
     wave.async((callback) => {
         fs.open(path, flags, 
             (err, fd) => {
@@ -43,7 +43,7 @@ export const openFile = (path: string, flags: string): IO<NodeJS.ErrnoException,
 /**
  * Here we close a file handle
  */
-export const closeFile = (handle: number): IO<NodeJS.ErrnoException, void> => wave.uninterruptible(
+export const closeFile = (handle: number): Wave<NodeJS.ErrnoException, void> => wave.uninterruptible(
     wave.async((callback) => {
         fs.close(handle, (err) => {
             if (err) {
@@ -55,13 +55,13 @@ export const closeFile = (handle: number): IO<NodeJS.ErrnoException, void> => wa
         return () => {};
     }));
 
-export const open = (path: string, flags: string): Resource<NodeJS.ErrnoException, number> => 
-    resource.bracket(openFile(path, flags), closeFile);
+export const open = (path: string, flags: string): Managed<NodeJS.ErrnoException, number> => 
+    managed.bracket(openFile(path, flags), closeFile);
 
 /**
  * We can also use a file handle to write content
  */
-export const write = (handle: number, data: string): IO<NodeJS.ErrnoException, number> => wave.uninterruptible(
+export const write = (handle: number, data: string): Wave<NodeJS.ErrnoException, number> => wave.uninterruptible(
     wave.async((callback) => {
         fs.write(handle, data, (err, written) => {
             if (err) {
@@ -74,8 +74,8 @@ export const write = (handle: number, data: string): IO<NodeJS.ErrnoException, n
     })
 )
 
-export const read = (handle: number, length: number): IO<NodeJS.ErrnoException, [Buffer, number]> => wave.uninterruptible(
-    // Here we see suspended, which is how we can 'effectfully' create an IO to run
+export const read = (handle: number, length: number): Wave<NodeJS.ErrnoException, [Buffer, number]> => wave.uninterruptible(
+    // Here we see suspended, which is how we can 'effectfully' create an Wave to run
     // In this case we allocate a mutable buffer inside suspended
     wave.suspended(() => {
         const buffer = Buffer.alloc(length);

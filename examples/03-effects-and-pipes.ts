@@ -17,11 +17,11 @@ import * as s from "../src/stream";
 import * as snk from "../src/sink";
 import * as cio from "waveguide/lib/console";
 import { Stream } from "../src/stream";
-import { IO } from "waveguide/lib/io";
-import * as wave from "waveguide/lib/io";
-import * as resource from "waveguide/lib/resource";
+import { Wave } from "waveguide/lib/wave";
+import * as wave from "waveguide/lib/wave";
+import * as managed from "waveguide/lib/managed";
 import { open, read } from "./common";
-import { Resource } from "waveguide/lib/resource";
+import { Managed } from "waveguide/lib/managed";
 
 /**
  * Streams can also perform actions effectfully.
@@ -36,16 +36,16 @@ import { Resource } from "waveguide/lib/resource";
  * So, to start with reading a file, we need a resource of a file descriptor
  */
 
-const fd: Resource<NodeJS.ErrnoException, number> = open("./package.json", "r");
+const fd: Managed<NodeJS.ErrnoException, number> = open("./package.json", "r");
 
 /**
  * Now, given a file descriptor, we need to turn this into a Fold.
- * One way of doing so, is by using the fromSource function, which converts a Resource<E, IO<E, Option<A>> into a Stream<E, A>
+ * One way of doing so, is by using the fromSource function, which converts a Managed<E, IO<E, Option<A>> into a Stream<E, A>
  * The expectation is that the IO will return some until it eventually returns none to signify stream exhaustion
  * Lets do this
  */
-const source: Resource<NodeJS.ErrnoException, IO<NodeJS.ErrnoException, Option<readonly [Buffer, number]>>> = 
-    resource.map(fd, (h) => {
+const source: Managed<NodeJS.ErrnoException, Wave<NodeJS.ErrnoException, Option<readonly [Buffer, number]>>> = 
+    managed.map(fd, (h) => {
         // This will read a 120 byte block
         // I picked 120 because this will guarantee that no lines are wider than 120 in the output
         const doRead = read(h, 120);
@@ -81,5 +81,5 @@ const sink = snk.evalSink(cio.log);
 /**
  * Thus, we compile our final action to run the pipeline
  */
-wave.runR(s.into(upper, sink), {});
+wave.run(s.into(upper, sink));
 

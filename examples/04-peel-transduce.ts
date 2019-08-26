@@ -21,9 +21,9 @@ import * as stream from "../src/stream";
 import * as snk from "../src/sink";
 import * as stp from "../src/step";
 import * as common from "./common";
-import { Resource } from "waveguide/lib/resource";
-import * as resource from "waveguide/lib/resource";
-import * as wave from "waveguide/lib/io";
+import { Managed } from "waveguide/lib/managed";
+import * as managed from "waveguide/lib/managed";
+import * as wave from "waveguide/lib/wave";
 import { pipe } from "fp-ts/lib/pipeable";
 import { zipWith as arrayZipWith, array} from "fp-ts/lib/Array";
 import { Sink } from "../src/sink";
@@ -82,7 +82,7 @@ function splitSink<R, E>(split: string): snk.Sink<E, SplitState, string, string[
  */
 function csvFileLabelled(path: string): Stream<NodeJS.ErrnoException, string> {
     const fd = common.open(path, "r");
-    const source = resource.map(fd, (h) => {
+    const source = managed.map(fd, (h) => {
         const doRead = common.read(h, 120);
         return wave.map(doRead, (([buf, len]) => len > 0 ? some([buf, len] as const) : none))
     });
@@ -154,9 +154,9 @@ const outLines = stream.map(records, (s) => s + "\n");
  * Now we want to create sink that we can write to
  * @param path 
  */
-export function writeFile(path: string): Resource<NodeJS.ErrnoException, Sink<NodeJS.ErrnoException, void, string, void>> {
+export function writeFile(path: string): Managed<NodeJS.ErrnoException, Sink<NodeJS.ErrnoException, void, string, void>> {
     const fd = common.open(path, "w")
-    return resource.map(fd, (h) => snk.evalSink((s) => common.write(h, s)));
+    return managed.map(fd, (h) => snk.evalSink((s) => common.write(h, s)));
 }
 
 /**
@@ -164,4 +164,4 @@ export function writeFile(path: string): Resource<NodeJS.ErrnoException, Sink<No
  */
 const io = stream.intoManaged(outLines, writeFile("examples/csv/Demographic_Statistics_By_Zip_Code.txt"));
 
-wave.runR(io, {});
+wave.run(io);

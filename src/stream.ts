@@ -26,6 +26,8 @@ import * as cq from "waveguide/lib/queue";
 import { Sink, collectArraySink, drainSink, drainWhileSink, stepMany, queueSink } from "./sink";
 import { isSinkCont, SinkStep, isSinkDone, sinkStepLeftover, sinkStepState } from "./step";
 import { ExitTag } from "waveguide/lib/exit";
+import { Deferred } from "waveguide/lib/deferred";
+import * as deferred from "waveguide/lib/deferred";
 import { Monad, Monad2 } from "fp-ts/lib/Monad";
 
 export type Source<E, A> = Wave<E, Option<A>>
@@ -380,48 +382,6 @@ export function transduce<E, A, S, B>(stream: Stream<E, A>, sink: Sink<E, S, A, 
     );
 }
 
-enum StepTag {
-    Value,
-    End,
-    Error,
-    Abort
-}
-
-export interface StepValue<E, A> {
-    _tag: StepTag.Value;
-    a: A;
-}
-
-export function stepValue<A>(a: A): Step<never, A> {
-    return { _tag: StepTag.Value, a };
-}
-
-export interface StepError<E, A> {
-    _tag: StepTag.Error;
-    e: E;
-}
-
-export function stepError<E>(e: E): Step<E, never> {
-    return { _tag: StepTag.Error, e };
-}
-
-export interface StepAbort<E, A> {
-    _tag: StepTag.Abort;
-    e: unknown;
-}
-
-export function stepAbort(e: unknown): Step<never, never> {
-    return { _tag: StepTag.Abort, e };
-}
-
-export interface StepEnd<E, A> {
-    _tag: StepTag.End;
-}
-
-export const stepEnd: Step<never, never> = { _tag: StepTag.End };
-
-export type Step<E, A> = StepValue<E, A> | StepError<E, A> | StepEnd<E, A> | StepAbort<E, A>;
-
 export function drop<E, A>(stream: Stream<E, A>, n: number): Stream<E, A> {
     return pipe(
         zipWithIndex(stream),
@@ -499,51 +459,72 @@ export function intoLeftover<E, A, S, B>(stream: Stream<E, A>, sink: Sink<E, S, 
         ));
 }
 
-function sinkQueue<E, A>(stream: Stream<E, A>): Managed<E, ConcurrentQueue<Step<E, A>>> {
-    return pipe(
-        managed.encaseWave(cq.boundedQueue<Step<E, A>>(1)),
-        managed.chainWith((q) => {
-            const write = into(map(stream, stepValue) as Stream<E, Step<E, A>>, queueSink(q));
-            const bracket = wave.uninterruptibleMask<E, void>((cutout) => 
-                wave.chain(wave.result(cutout(write)), (exit) => {
-                    console.log("internal finished");
-                    if (exit._tag === ExitTag.Done || exit._tag === ExitTag.Interrupt) {
-                        return wave.forever(q.offer(stepEnd));
-                    } else if (exit._tag === ExitTag.Raise) {
-                        return wave.forever(q.offer(stepError(exit.error)));
-                    } else {
-                        return wave.forever(q.offer(stepAbort(exit.abortedWith)));
-                    }
-                })
-            );
-            return managed.as(managed.fiber(bracket), q);
-        })
-    );
-}
-
-export function zipWith<E, A, B, C>(as: Stream<E, A>, bs: Stream<E, B>, f: FunctionN<[A, B], C>): Stream<E, C> {
-    const source = managed.zipWith(sinkQueue(as), sinkQueue(bs), (qa, qb) => {
-        return wave.flatten(
-                wave.zipWith<never, Step<E, A>, Step<E, B>, Wave<E, Option<C>>>(qa.take, qb.take, (sa, sb) => {
-                    if (sa._tag === StepTag.Value && sb._tag === StepTag.Value) {
-                        return wave.pure(some(f(sa.a, sb.a)));
-                    } else if (sa._tag === StepTag.End || sb._tag === StepTag.End) {
-                        return wave.pure(none);
-                        // TODO: When we have errors that cover both of these
-                    } else if (sa._tag === StepTag.Error) {
-                        return wave.raiseError(sa.e);
-                    } else if (sa._tag === StepTag.Abort) {
-                        return wave.raiseAbort(sa.e);
-                    } else if (sb._tag === StepTag.Error) {
-                        return wave.raiseError(sb.e);
-                    } else if (sb._tag === StepTag.Abort) {
-                        return wave.raiseAbort(sb.e);
-                    } else {
-                        return wave.raiseAbort("something thought impossible has happaned")
+import * as cio from "waveguide/lib/console";
+function sinkQueue<E, A>(stream: Stream<E, A>): Managed<E, readonly [ConcurrentQueue<Option<A>>, Deferred<E, Option<A>>]> {
+    return managed.chain(
+        managed.zip(
+            managed.encaseWave(cq.boundedQueue<Option<A>>(0)),
+            managed.encaseWave(deferred.makeDeferred<E, Option<A>>())
+        ),
+        ([q, latch]) => {
+            const write = pipe(
+                into(map(stream, some), queueSink(q)),
+                wave.result,
+                wave.chainWith((e) => {
+                    switch (e._tag) {
+                        // Waiting on fix for https://github.com/rzeigler/waveguide/issues/14
+                        case ExitTag.Abort:
+                            return wave.applySecond(
+                                cio.error("handling stream aborts not yet implemented", e.abortedWith),
+                                wave.raiseAbort("handling stream aborts not yet implemented")
+                            );
+                        case ExitTag.Raise:
+                            return latch.error(e.error);
+                        default: // interrupt or done (but interrupt probably doesn't matter)
+                            return q.offer(none); // we set the none and allow the consumer to operate no the latch
                     }
                 })
             )
+            return managed.as(managed.fiber(write), [q, latch] as const)
+        }
+    )
+}
 
+export function zipWith<E, A, B, C>(as: Stream<E, A>, bs: Stream<E, B>, f: FunctionN<[A, B], C>): Stream<E, C> {
+    const source = managed.zipWith(sinkQueue(as), sinkQueue(bs), ([aq, alatch], [bq, blatch]) => {
+        const atake = pipe(
+            aq.take,
+            wave.chainTapWith((opt) =>
+                pipe(
+                    opt,
+                    o.fold(
+                        // Confirm we have seen the last element
+                        () => alatch.done(none),
+                        () => wave.unit // just keep going
+                    )
+                )
+            )
+        );
+        const agrab = wave.raceFirst(atake, alatch.wait);
+        const btake = pipe(
+            bq.take,
+            wave.chainTapWith((opt) =>
+                pipe(
+                    opt,
+                    o.fold(
+                        // Confirm we have seen the last element
+                        () => blatch.done(none),
+                        () => wave.unit // just keep going
+                    )
+                )
+            )
+        );
+        const bgrab = wave.raceFirst(btake, blatch.wait);
+
+        return wave.zipWith(agrab, bgrab, (aOpt, bOpt) =>
+            o.option.chain((aOpt), (a) => 
+                o.option.map(bOpt, (b) => f(a, b)))
+        )
     })
     return fromSource(source);
 }
@@ -553,23 +534,22 @@ export function zip<E, A, B>(as: Stream<E, A>, bs: Stream<E, B>): Stream<E, read
 }
 
 export function peel<E, A, S, B>(stream: Stream<E, A>, sink: Sink<E, S, A, B>): Stream<E, readonly [B, Stream<E, A>]> {
-    const source: Managed<E, Wave<E, Option<A>>> = managed.map(sinkQueue(stream), (q) => 
-        pipe(
+    const source: Managed<E, Wave<E, Option<A>>> = managed.map(sinkQueue(stream), ([q, latch]) => {
+        const take = pipe(
             q.take,
-            wave.chainWith((step): Wave<E, Option<A>> => {
-                console.log("got step", step);
-                if (step._tag === StepTag.Value) {
-                    return wave.pure(some(step.a));
-                } else if (step._tag === StepTag.End) {
-                    return wave.pure(none);
-                } else if (step._tag === StepTag.Error) {
-                    return wave.raiseError(step.e);
-                } else {
-                    return wave.raiseAbort(step.e);
-                }
-            })
+            wave.chainTapWith((opt) =>
+                pipe(
+                    opt,
+                    o.fold(
+                        // Confirm we have seen the last element
+                        () => latch.done(none),
+                        () => wave.unit // just keep going
+                    )
+                )
+            )
         )
-    );
+        return wave.raceFirst(take, latch.wait);
+    });
 
     return managed.chain(source, (pull) => {
         const pullStream = fromSource<E, A>(managed.pure(pull));
@@ -586,7 +566,7 @@ export function peelManaged<E, A, S, B>(stream: Stream<E, A>, managedSink: Manag
 }
 
 export function dropWhile<E, A>(stream: Stream<E, A>, pred: Predicate<A>): Stream<E, A> {
-    return chain(peel(stream, drainWhileSink(pred)), 
+    return chain(peel(stream, drainWhileSink(pred)),
         ([head, rest]) => concat(fromOption(head) as Stream<E, A>, rest))
 }
 

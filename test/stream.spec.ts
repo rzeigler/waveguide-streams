@@ -180,9 +180,9 @@ describe("streams", () => {
             ]));
         })
     });
-    describe.only("peel", () => {
+    describe("peel", () => {
         const multiplier = sink.map(sink.headSink<never, number>(), (opt) => opt._tag === "Some" ? opt.value : 1);
-        it.only("should handle empty arrays", () => {
+        it("should handle empty arrays", () => {
             const s1 = s.empty as Stream<never, number>;
             const s2 = s.peel(s1, multiplier);
             return expectExit(s.collectArray(s.chain(s2, ([h, r]) => r)), done([]));

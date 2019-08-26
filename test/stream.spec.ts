@@ -119,7 +119,6 @@ describe("streams", () => {
         // We describe transduction as the process of consuming some elements (1 or more) to produce an output element
         // The transducer used for the test is a summer
         // i.e. it consumes the number of elements to read, then that number of elements, and then outputs the sum
-
         function transducer(): Sink<never, readonly [number, number], number, number> {
             const initial = sinkCont([-1, 0] as const);
             
@@ -181,8 +180,13 @@ describe("streams", () => {
             ]));
         })
     });
-    describe("peel", () => {
+    describe.only("peel", () => {
         const multiplier = sink.map(sink.headSink<never, number>(), (opt) => opt._tag === "Some" ? opt.value : 1);
+        it.only("should handle empty arrays", () => {
+            const s1 = s.empty as Stream<never, number>;
+            const s2 = s.peel(s1, multiplier);
+            return expectExit(s.collectArray(s.chain(s2, ([h, r]) => r)), done([]));
+        });
         it("should extract a head and return a subsequent element", () => {
             const s1 = s.fromArray([2, 6, 9])
             const s2 =  
@@ -221,13 +225,21 @@ describe("streams", () => {
             return expectExit(s.collectArray(s3), done([6, 8, 10]));
         })
     });
-    // describe("dropWhile", () => {
-    //     it ("should drop elements", () => {
-    //         const s1 = s.fromArray([-2, -1, 0, 1, 2, 1, 0, -1, -2]);
-    //         const s2 = s.dropWhile(s1, (i) => i <= 0);
-    //         return expectExit(s.collectArray(s2), done([1, 2, 1, 0, -1, -2]));
-    //     });
-    // });
+    describe("dropWhile", () => {
+        it ("should drop elements", () => {
+            const s1 = s.fromArray([-2, -1, 0, 1, 2, 1, 0, -1, -2]);
+            const s2 = s.dropWhile(s1, (i) => i <= 0);
+            return expectExit(s.collectArray(s2), done([1, 2, 1, 0, -1, -2]));
+        });
+        // it("should handle never finding an element", () => {
+        //     const s1 = s.fromArray([-2, -3, -1, -8]);
+        //     const s2 = s.dropWhile(s1, (i) => i <= 0);
+        //     return expectExit(s.collectArray(s2), done([]));
+        // });
+        // it("should handle empty arrays", () => {
+
+        // })
+    });
     describe("take", () => {
         it ("should take elements", () => {
             const s1 = s.fromArray([1, 2, 3, 4]);

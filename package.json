@@ -62,5 +62,6 @@
   "peerDependencies": {
     "fp-ts": "^2.0.0",
     "waveguide": "1.0.0-rc.1"
-  }
+  },
+  "dependencies": {}
 }

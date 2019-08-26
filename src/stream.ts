@@ -26,6 +26,7 @@ import * as cq from "waveguide/lib/queue";
 import { Sink, collectArraySink, drainSink, drainWhileSink, stepMany, queueSink } from "./sink";
 import { isSinkCont, SinkStep, isSinkDone, sinkStepLeftover, sinkStepState } from "./step";
 import { ExitTag } from "waveguide/lib/exit";
+import { Monad, Monad2 } from "fp-ts/lib/Monad";
 
 export type Source<E, A> = Wave<E, Option<A>>
 
@@ -502,22 +503,20 @@ function sinkQueue<E, A>(stream: Stream<E, A>): Managed<E, ConcurrentQueue<Step<
     return pipe(
         managed.encaseWave(cq.boundedQueue<Step<E, A>>(1)),
         managed.chainWith((q) => {
-            const writer = into(map(stream, stepValue) as Stream<E, Step<E, A>>, queueSink(q));   
-            return managed.chain(
-                managed.fiber(writer),
-                (writerFiber) => {
-                    const listener: Wave<E, void> = wave.chain(writerFiber.wait, (exit) => {
-                        if (exit._tag === ExitTag.Done || exit._tag === ExitTag.Interrupt) {
-                            return q.offer(stepEnd);
-                        } else if (exit._tag === ExitTag.Raise) {
-                            return q.offer(stepError(exit.error));
-                        } else {
-                            return q.offer(stepAbort(exit.abortedWith));
-                        }
-                    })
-                    return managed.as(managed.fiber(listener), q);
-                }
+            const write = into(map(stream, stepValue) as Stream<E, Step<E, A>>, queueSink(q));
+            const bracket = wave.uninterruptibleMask<E, void>((cutout) => 
+                wave.chain(wave.result(cutout(write)), (exit) => {
+                    console.log("internal finished");
+                    if (exit._tag === ExitTag.Done || exit._tag === ExitTag.Interrupt) {
+                        return wave.forever(q.offer(stepEnd));
+                    } else if (exit._tag === ExitTag.Raise) {
+                        return wave.forever(q.offer(stepError(exit.error)));
+                    } else {
+                        return wave.forever(q.offer(stepAbort(exit.abortedWith)));
+                    }
+                })
             );
+            return managed.as(managed.fiber(bracket), q);
         })
     );
 }
@@ -558,6 +557,7 @@ export function peel<E, A, S, B>(stream: Stream<E, A>, sink: Sink<E, S, A, B>): 
         pipe(
             q.take,
             wave.chainWith((step): Wave<E, Option<A>> => {
+                console.log("got step", step);
                 if (step._tag === StepTag.Value) {
                     return wave.pure(some(step.a));
                 } else if (step._tag === StepTag.End) {
@@ -585,6 +585,12 @@ export function peelManaged<E, A, S, B>(stream: Stream<E, A>, managedSink: Manag
     return managed.chain(managedSink, (sink) => peel(stream, sink));
 }
 
+export function dropWhile<E, A>(stream: Stream<E, A>, pred: Predicate<A>): Stream<E, A> {
+    return chain(peel(stream, drainWhileSink(pred)), 
+        ([head, rest]) => concat(fromOption(head) as Stream<E, A>, rest))
+}
+
+
 export function collectArray<E, A>(stream: Stream<E, A>): Wave<E, A[]> {
     return into(stream, collectArraySink());
 }
@@ -592,3 +598,19 @@ export function collectArray<E, A>(stream: Stream<E, A>): Wave<E, A[]> {
 export function drain<E, A>(stream: Stream<E, A>): Wave<E, void> {
     return into(stream, drainSink());
 }
+
+export const URI = "Stream";
+export type URI = typeof URI;
+declare module "fp-ts/lib/HKT" {
+    interface URItoKind2<E, A> {
+        Stream: Stream<E, A>;
+    }
+}
+
+export const instances: Monad2<URI> = {
+    URI,
+    map,
+    of: <E, A>(a: A): Stream<E, A> => once(a) as Stream<E, A>,
+    ap: <E, A, B>(sfab: Stream<E, FunctionN<[A], B>>, sa: Stream<E, A>) => zipWith(sfab, sa, (f, a) => f(a)),
+    chain,
+} as const;

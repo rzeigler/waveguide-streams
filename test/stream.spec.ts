@@ -15,7 +15,7 @@
 import * as s from "../src/stream";
 import { Stream } from "../src/stream";
 import * as ref from "waveguide/lib/ref";
-import { done, raise } from "waveguide/lib/exit";
+import { done, raise, Exit } from "waveguide/lib/exit";
 import * as managed from "waveguide/lib/managed";
 import { expectExit } from "./tools.spec";
 import { pipe } from "fp-ts/lib/pipeable";
@@ -26,10 +26,6 @@ import { SinkStep, sinkDone, sinkCont } from "../src/step";
 import { identity } from "fp-ts/lib/function";
 import * as wave from "waveguide/lib/wave";
 import { Wave } from "waveguide/lib/wave";
-
-
-import * as cio from "waveguide/lib/console";
-
 
 describe("streams", () => {
   describe("empty", () => {
@@ -97,15 +93,15 @@ describe("streams", () => {
   describe("fromSource", () => {
     it("should construct a stream from a source", () => {
       const source =
-                pipe(
-                  managed.encaseWave(ref.makeRef([1, 2, 3])),
-                  managed.mapWith((cell) =>
-                    cell.modify((as) => {
-                      return as.length === 0 ?
-                                [none as Option<number>, as] as const : [some(as[0]), as.slice(1, as.length)] as const;
-                    })
-                  )
-                );
+        pipe(
+          managed.encaseWave(ref.makeRef([1, 2, 3])),
+          managed.mapWith((cell) =>
+            cell.modify((as) => {
+              return as.length === 0 ?
+                [none as Option<number>, as] as const : [some(as[0]), as.slice(1, as.length)] as const;
+            })
+          )
+        );
       const s1 = s.fromSource(source)
       return expectExit(s.collectArray(s1), done([1, 2, 3]));
     });
@@ -223,20 +219,20 @@ describe("streams", () => {
     it("should extract a head and return a subsequent element", () => {
       const s1 = s.fromArray([2, 6, 9])
       const s2 =
-                s.chain(s.peel(s1, multiplier),
-                  ([head, rest]) => {
-                    return s.map(rest, (v) => v * head)
-                  })
+        s.chain(s.peel(s1, multiplier),
+          ([head, rest]) => {
+            return s.map(rest, (v) => v * head)
+          })
       return expectExit(s.collectArray(s2), done([12, 18]));
     });
     it("should compose", () => {
       const s1 = s.fromRange(3, 1, 8) // emits 3, 4, 5, 6, 7, 8
       const s2 = s.filter(s1, (x) => x % 2 === 0); // emits 4 6 8
       const s3 =
-                s.chain(s.peel(s2, multiplier),
-                  ([head, rest]) => { // head is 4
-                    return s.map(rest, (v) => v * head)  // emits 24 32
-                  });
+        s.chain(s.peel(s2, multiplier),
+          ([head, rest]) => { // head is 4
+            return s.map(rest, (v) => v * head)  // emits 24 32
+          });
       return expectExit(s.collectArray(s3), done([24, 32]));
     });
     it("should raise errors", () => {
@@ -335,8 +331,33 @@ describe("streams", () => {
       const s3 = s.switchLatest(s.concat(s2, s.encaseWave(after30)));
       return expectExit(s.collectArray(s3), done([0, 1, 0, 1, 0, 1, 2, 3]));
     });
-    it("should terminate on error", () => {
+    it("should fail with errors in outer stream", () => {
+      const io = wave.chain(ref.makeRef(0), (cell) => {
+        const s1: Wave<string, Stream<string, number>> = wave.delay(wave.pure(s.encaseWave(cell.set(1))), 50) as Wave<string, Stream<string, number>>;
+        const s2: Wave<string, Stream<string, number>> = wave.delay(wave.raiseError("boom"), 50) as Wave<string, Stream<string, number>>;
+        const s3: Wave<string, Stream<string, number>> = wave.delay(wave.pure(s.encaseWave(cell.set(2))), 50) as Wave<string, Stream<string, number>>;
 
+        const set: Stream<string, Wave<string, Stream<string, number>>> = s.fromArray([s1, s2, s3]) as Stream<string, Wave<string, Stream<string, number>>>;
+        const stream: Stream<string, Stream<string, number>> = s.mapM(set, identity);
+
+        const drain = wave.result(s.drain(s.switchLatest(stream)));
+        return wave.zip(drain, wave.delay(cell.get, 100));
+      });
+      return expectExit(io, done([raise("boom"), 1] as const) as Exit<never, readonly [Exit<string, void>, number]>);
+    });
+    it("should fail with errors in the inner streams", () => {
+      const io = wave.chain(ref.makeRef(0), (cell) => {
+        const s1: Wave<string, Stream<string, number>> = wave.delay(wave.pure(s.encaseWave(cell.set(1))), 50) as Wave<string, Stream<string, number>>;
+        const s2: Wave<string, Stream<string, number>> = wave.delay(wave.pure(s.encaseWave(wave.raiseError("boom"))), 50) as Wave<string, Stream<string, number>>;
+        const s3: Wave<string, Stream<string, number>> = wave.delay(wave.pure(s.encaseWave(cell.set(2))), 50) as Wave<string, Stream<string, number>>;
+
+        const set: Stream<string, Wave<string, Stream<string, number>>> = s.fromArray([s1, s2, s3]) as Stream<string, Wave<string, Stream<string, number>>>;
+        const stream: Stream<string, Stream<string, number>> = s.mapM(set, identity);
+
+        const drain = wave.result(s.drain(s.switchLatest(stream)));
+        return wave.zip(drain, wave.delay(cell.get, 100));
+      });
+      return expectExit(io, done([raise("boom"), 1] as const) as Exit<never, readonly [Exit<string, void>, number]>);
     });
   });
 });

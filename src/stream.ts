@@ -21,6 +21,7 @@ import { Wave, Fiber } from "waveguide/lib/wave";
 import * as managed from "waveguide/lib/managed";
 import { Managed } from "waveguide/lib/managed";
 import * as ref from "waveguide/lib/ref";
+import { Ref } from "waveguide/lib/ref";
 import { ConcurrentQueue } from "waveguide/lib/queue";
 import * as cq from "waveguide/lib/queue";
 import { Sink, collectArraySink, drainSink, drainWhileSink, stepMany, queueSink } from "./sink";
@@ -672,8 +673,6 @@ export function intoLeftover<E, A, S, B>(stream: Stream<E, A>, sink: Sink<E, S, 
     ));
 }
 
-import * as cio from "waveguide/lib/console";
-import { Ref } from "waveguide/lib/ref";
 function sinkQueue<E, A>(stream: Stream<E, A>): Managed<E, readonly [ConcurrentQueue<Option<A>>, Deferred<E, Option<A>>]> {
   return managed.chain(
     managed.zip(
@@ -684,17 +683,10 @@ function sinkQueue<E, A>(stream: Stream<E, A>): Managed<E, readonly [ConcurrentQ
     ([q, latch]) => {
       const write = pipe(
         into(map(stream, some), queueSink(q)),
-        wave.result,
-        wave.chainWith((e) => {
-          switch (e._tag) {
-            case ExitTag.Abort:
-              return latch.abort(e.abortedWith);
-            case ExitTag.Raise:
-              return latch.error(e.error);
-            default: // interrupt or done (but interrupt probably doesn't matter)
-              return q.offer(none); // we set the none and allow the consumer to operate no the latch
-          }
-        })
+        wave.foldExitWith(
+          latch.cause,
+          constant(q.offer(none))
+        )
       )
       return managed.as(managed.fiber(write), [q, latch] as const)
     }
@@ -847,20 +839,20 @@ export function switchLatest<E, A>(stream: Stream<E, Stream<E, A>>): Stream<E, A
             const interruptPushFiber = interruptFiberSlot(fiberSlot);
             // Spawn a fiber that should push elements from stream into pushQueue as long as it is able
             function spawnPushFiber(stream: Stream<E, A>): Wave<never, void> {
-              // The writer process pushes things into the queue
-              const writer = into(map(stream, some), queueSink(pushQueue));
-              // We need to trap any errors that occur and send those to internal latch to halt the process
-              const trapError = pipe(
-                writer,
+              const writer = pipe(
+                // The writer process pushes things into the queue
+                into(map(stream, some), queueSink(pushQueue)),
+                // We need to trap any errors that occur and send those to internal latch to halt the process
                 // Dont' worry about interrupts, because it should be fine during cleanup
                 wave.foldExitWith(
-                  (cause) => internalLatch.done(cause),
-                  (_a) => wave.pure(undefined))
+                  internalLatch.done,
+                  constant(wave.pure(undefined)) // we can do nothing because we will delegate to the proxy
+                )
               )
 
               return wave.applyFirst(
                 interruptPushFiber,
-                wave.chain(wave.fork(trapError), (f) => fiberSlot.set(some(f)))
+                wave.chain(wave.fork(writer), (f) => fiberSlot.set(some(f)))
               );
             }
 
@@ -873,9 +865,7 @@ export function switchLatest<E, A>(stream: Stream<E, Stream<E, A>>): Stream<E, A
               return wave.foldExit(
                 wave.raceFirst(pull, latchError),
                 // In the event of an error either from pull or from upstream we need to shut everything down
-                (cause) =>
-                  wave.applySecond(interruptPushFiber, pushLatch.cause(cause)),
-                // interruptwave.pure(undefined),
+                (cause) => wave.applySecond(interruptPushFiber, pushLatch.cause(cause)),
                 (nextOpt) =>
                   pipe(
                     nextOpt,
@@ -885,7 +875,7 @@ export function switchLatest<E, A>(stream: Stream<E, Stream<E, A>>): Stream<E, A
                         wave.race(latchError, waitFiberSlot(fiberSlot)),
                         wave.foldExitWith(
                           pushLatch.cause, // if we get a latchError forward it through to downstream
-                          constant(pushQueue.offer(none))
+                          constant(pushQueue.offer(none)) // otherwise we are done, so lets forward that
                         )
                       ),
                       (next) => wave.applySecondL(spawnPushFiber(next), () => advanceStreams())
@@ -893,11 +883,9 @@ export function switchLatest<E, A>(stream: Stream<E, Stream<E, A>>): Stream<E, A
                   )
               );
             }
-
-
             // We can configure this source now, but it will be invalid outside of running fibers
+            // Thus we can use managed.fiber
             const downstreamSource = queueLatchSource(pushQueue, pushLatch)
-
             return managed.as(managed.fiber(advanceStreams()), downstreamSource);
           })
         )

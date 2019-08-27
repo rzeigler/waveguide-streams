@@ -46,19 +46,19 @@ const basi = s.zipWithIndex(as);
  * We can effectfully map over them
  */
 function randomM(n: number): Wave<never, number> {
-    return wave.map(
-        wave.sync(() => Math.random()),
-        (i) => i * n
-    );
+  return wave.map(
+    wave.sync(() => Math.random()),
+    (i) => i * n
+  );
 }
 
 const ras = s.mapM(as, randomM);
 
 wave.run(array.sequence(wave.instances)([
-    log(s.collectArray(as)),
-    log(s.collectArray(nas)),
-    log(s.collectArray(bas)),
-    log(s.collectArray(bas)),
-    log(s.collectArray(basi)),
-    log(s.collectArray(ras))]
+  log(s.collectArray(as)),
+  log(s.collectArray(nas)),
+  log(s.collectArray(bas)),
+  log(s.collectArray(bas)),
+  log(s.collectArray(basi)),
+  log(s.collectArray(ras))]
 ))

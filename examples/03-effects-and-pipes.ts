@@ -46,12 +46,12 @@ const fd: Managed<NodeJS.ErrnoException, number> = open("./package.json", "r");
  */
 const source: Managed<NodeJS.ErrnoException, Wave<NodeJS.ErrnoException, Option<readonly [Buffer, number]>>> = 
     managed.map(fd, (h) => {
-        // This will read a 120 byte block
-        // I picked 120 because this will guarantee that no lines are wider than 120 in the output
-        const doRead = read(h, 120);
-        // But we still need a way of signalling termination
-        // If we read 0 bytes we are done
-        return wave.map(doRead, (([buf, len]) => len > 0 ? some([buf, len] as const) : none))
+      // This will read a 120 byte block
+      // I picked 120 because this will guarantee that no lines are wider than 120 in the output
+      const doRead = read(h, 120);
+      // But we still need a way of signalling termination
+      // If we read 0 bytes we are done
+      return wave.map(doRead, (([buf, len]) => len > 0 ? some([buf, len] as const) : none))
     }) 
 
 /**

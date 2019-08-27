@@ -21,7 +21,7 @@ import * as wave from "waveguide/lib/wave";
 
 // A nice helper for logging
 function log<E, A>(tag: string, io: Wave<E, A>): Wave<E, void> {
-    return wave.chain(io, (a) => cio.log(tag, a));
+  return wave.chain(io, (a) => cio.log(tag, a));
 }
 
 
@@ -43,9 +43,9 @@ const as: Stream<never, number>  = s.fromArray([42, 43, 44]);
 
 // From iterators
 const bs: Stream<never, number>  = s.fromIterator(function* (): Iterator<number> {
-    yield -42;
-    yield -43;
-    yield -44
+  yield -42;
+  yield -43;
+  yield -44
 })
 
 /**
@@ -64,7 +64,7 @@ const as_: Wave<never, number[]> = s.collectArray(as);
 const bs_: Wave<never, void> = s.drain(bs);
 
 wave.run(array.sequence(wave.instances)([
-    log("once", a_),
-    log("from array", as_),
-    log("from iterator drained", bs_)
+  log("once", a_),
+  log("from array", as_),
+  log("from iterator drained", bs_)
 ]));

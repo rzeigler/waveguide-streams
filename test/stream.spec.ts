@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { expect } from "chai";
 import * as s from "../src/stream";
 import { Stream } from "../src/stream";
 import * as ref from "waveguide/lib/ref";
@@ -26,6 +27,8 @@ import { SinkStep, sinkDone, sinkCont } from "../src/step";
 import { identity } from "fp-ts/lib/function";
 import * as wave from "waveguide/lib/wave";
 import { Wave } from "waveguide/lib/wave";
+import * as array from "fp-ts/lib/Array";
+import * as eq from "fp-ts/lib/Eq";
 
 describe("streams", () => {
   describe("empty", () => {
@@ -359,5 +362,17 @@ describe("streams", () => {
       });
       return expectExit(io, done([raise("boom"), 1] as const) as Exit<never, readonly [Exit<string, void>, number]>);
     });
+    it("switching should occur", () =>  {
+      const s1 = s.take(s.periodically(50), 10);
+      const s2 = s.switchMapLatest(s1, (i) => s.as(s.take(s.periodically(10), 10), i))
+      const output = s.collectArray(s2);
+      return wave.runToPromise(output)
+        .then((values) => {
+          const pairs = array.chunksOf(2)(values);
+          pairs.forEach(([f, s]) => 
+            expect(values.lastIndexOf(f)).to.be.greaterThan(values.indexOf(s))
+          );
+        })
+    })
   });
 });

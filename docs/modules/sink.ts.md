@@ -8,9 +8,8 @@ parent: Modules
 
 <h2 class="text-delta">Table of contents</h2>
 
-- [RSink (interface)](#rsink-interface)
+- [Sink (interface)](#sink-interface)
 - [SinkPure (interface)](#sinkpure-interface)
-- [Sink (type alias)](#sink-type-alias)
 - [collectArraySink (function)](#collectarraysink-function)
 - [constSink (function)](#constsink-function)
 - [drainSink (function)](#drainsink-function)
@@ -25,15 +24,15 @@ parent: Modules
 
 ---
 
-# RSink (interface)
+# Sink (interface)
 
 **Signature**
 
 ```ts
-export interface RSink<R, E, S, A, B> {
-  readonly initial: RIO<R, E, SinkStep<A, S>>
-  step(state: S, next: A): RIO<R, E, SinkStep<A, S>>
-  extract(step: S): RIO<R, E, B>
+export interface Sink<E, S, A, B> {
+  readonly initial: Wave<E, SinkStep<A, S>>
+  step(state: S, next: A): Wave<E, SinkStep<A, S>>
+  extract(step: S): Wave<E, B>
 }
 ```
 
@@ -49,20 +48,12 @@ export interface SinkPure<S, A, B> {
 }
 ```
 
-# Sink (type alias)
-
-**Signature**
-
-```ts
-export type Sink<E, S, A, B> = RSink<DefaultR, E, S, A, B>
-```
-
 # collectArraySink (function)
 
 **Signature**
 
 ```ts
-export function collectArraySink<R, E, A>(): RSink<R, E, A[], A, A[]> { ... }
+export function collectArraySink<E, A>(): Sink<E, A[], A, A[]> { ... }
 ```
 
 # constSink (function)
@@ -70,7 +61,7 @@ export function collectArraySink<R, E, A>(): RSink<R, E, A[], A, A[]> { ... }
 **Signature**
 
 ```ts
-export function constSink<R, E, A, B>(b: B): RSink<R, E, void, A, B> { ... }
+export function constSink<E, A, B>(b: B): Sink<E, void, A, B> { ... }
 ```
 
 # drainSink (function)
@@ -78,7 +69,7 @@ export function constSink<R, E, A, B>(b: B): RSink<R, E, void, A, B> { ... }
 **Signature**
 
 ```ts
-export function drainSink<R, E, A>(): RSink<R, E, void, A, void> { ... }
+export function drainSink<E, A>(): Sink<E, void, A, void> { ... }
 ```
 
 # drainWhileSink (function)
@@ -86,7 +77,7 @@ export function drainSink<R, E, A>(): RSink<R, E, void, A, void> { ... }
 **Signature**
 
 ```ts
-export function drainWhileSink<R, E, A>(f: Predicate<A>): RSink<R, E, Option<A>, A, Option<A>> { ... }
+export function drainWhileSink<E, A>(f: Predicate<A>): Sink<E, Option<A>, A, Option<A>> { ... }
 ```
 
 # evalSink (function)
@@ -94,7 +85,7 @@ export function drainWhileSink<R, E, A>(f: Predicate<A>): RSink<R, E, Option<A>,
 **Signature**
 
 ```ts
-export function evalSink<R, E, A>(f: FunctionN<[A], RIO<R, E, unknown>>): RSink<R, E, void, A, void> { ... }
+export function evalSink<E, A>(f: FunctionN<[A], Wave<E, unknown>>): Sink<E, void, A, void> { ... }
 ```
 
 # headSink (function)
@@ -102,7 +93,7 @@ export function evalSink<R, E, A>(f: FunctionN<[A], RIO<R, E, unknown>>): RSink<
 **Signature**
 
 ```ts
-export function headSink<R, E, A>(): RSink<R, E, Option<A>, A, Option<A>> { ... }
+export function headSink<E, A>(): Sink<E, Option<A>, A, Option<A>> { ... }
 ```
 
 # lastSink (function)
@@ -110,7 +101,7 @@ export function headSink<R, E, A>(): RSink<R, E, Option<A>, A, Option<A>> { ... 
 **Signature**
 
 ```ts
-export function lastSink<R, E, A>(): RSink<R, E, Option<A>, A, Option<A>> { ... }
+export function lastSink<E, A>(): Sink<E, Option<A>, A, Option<A>> { ... }
 ```
 
 # liftPureSink (function)
@@ -126,7 +117,7 @@ export function liftPureSink<S, A, B>(sink: SinkPure<S, A, B>): Sink<never, S, A
 **Signature**
 
 ```ts
-export function map<R, E, S, A, B, C>(sink: RSink<R, E, S, A, B>, f: FunctionN<[B], C>): RSink<R, E, S, A, C> { ... }
+export function map<E, S, A, B, C>(sink: Sink<E, S, A, B>, f: FunctionN<[B], C>): Sink<E, S, A, C> { ... }
 ```
 
 # queueSink (function)
@@ -134,7 +125,7 @@ export function map<R, E, S, A, B, C>(sink: RSink<R, E, S, A, B>, f: FunctionN<[
 **Signature**
 
 ```ts
-export function queueSink<R, E, A>(queue: ConcurrentQueue<A>): RSink<R, E, void, A, void> { ... }
+export function queueSink<E, A>(queue: ConcurrentQueue<A>): Sink<E, void, A, void> { ... }
 ```
 
 # stepMany (function)
@@ -146,5 +137,5 @@ and anything left in the array
 **Signature**
 
 ```ts
-export function stepMany<R, E, S, A, B>(sink: RSink<R, E, S, A, B>, s: S, multi: readonly A[]): RIO<R, E, SinkStep<A, S>> { ... }
+export function stepMany<E, S, A, B>(sink: Sink<E, S, A, B>, s: S, multi: readonly A[]): Wave<E, SinkStep<A, S>> { ... }
 ```

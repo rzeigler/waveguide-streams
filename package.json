@@ -62,5 +62,7 @@
     "fp-ts": "^2.0.0",
     "waveguide": "1.0.0-rc.3"
   },
-  "dependencies": {}
+  "dependencies": {
+    "fp-ts-contrib": "^0.1.2"
+  }
 }

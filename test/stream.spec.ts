@@ -203,7 +203,7 @@ describe("streams", function () {
     }
 
     it("should handle remainders set correctly", () => {
-      const s1 = s.fromRange(0, 1, 4);
+      const s1 = s.fromRange(0, 1, 5);
       const s2 = s.transduce(s1, slidingBuffer());
       return expectExit(s.collectArray(s2), done([
         [0, 1, 2],
@@ -230,7 +230,7 @@ describe("streams", function () {
       return expectExit(s.collectArray(s2), done([12, 18]));
     });
     it("should compose", () => {
-      const s1 = s.fromRange(3, 1, 8) // emits 3, 4, 5, 6, 7, 8
+      const s1 = s.fromRange(3, 1, 9) // emits 3, 4, 5, 6, 7, 8
       const s2 = s.filter(s1, (x) => x % 2 === 0); // emits 4 6 8
       const s3 =
         s.chain(s.peel(s2, multiplier),
@@ -264,7 +264,7 @@ describe("streams", function () {
       return expectExit(s.collectArray(s2), done([]));
     });
     it("should compose", () => {
-      const s1 = s.fromRange(0, 1, 10) // [0, 10]
+      const s1 = s.fromRange(0, 1, 11) // [0, 11)
       const s2 = s.filter(s1, (x) => x % 2 === 0); // [0, 2, 4, 6, 8, 10]
       const s3 = s.drop(s2, 3);
       return expectExit(s.collectArray(s3), done([6, 8, 10]));
@@ -316,7 +316,7 @@ describe("streams", function () {
       const s1 = s.fromRange(0);
       const s2 = s.fromRange(0, 1, 4);
       const s3 = s.zip(s1, s2);
-      return expectExit(s.collectArray(s3), done([[0, 0], [1, 1], [2, 2], [3, 3], [4, 4]]));
+      return expectExit(s.collectArray(s3), done([[0, 0], [1, 1], [2, 2], [3, 3]]));
     });
     it("should handle errors", () => {
       const s1 = s.fromRange(0) as Stream<string, number>;
@@ -363,17 +363,58 @@ describe("streams", function () {
       });
       return expectExit(io, done([raise("boom"), 1] as const) as Exit<never, readonly [Exit<string, void>, number]>);
     });
-    it("switching should occur", () =>  {
+    it("switching should occur", () => {
       const s1 = s.take(s.periodically(50), 10);
       const s2 = s.switchMapLatest(s1, (i) => s.as(s.take(s.periodically(10), 10), i))
       const output = s.collectArray(s2);
       return wave.runToPromise(output)
         .then((values) => {
           const pairs = array.chunksOf(2)(values);
-          pairs.forEach(([f, s]) => 
+          pairs.forEach(([f, s]) =>
             expect(values.lastIndexOf(f)).to.be.greaterThan(values.indexOf(s))
           );
+        });
+    });
+  });
+  function repeater<E, A>(w: Wave<E, A>, n: number): Wave<E, A> {
+    if (n <= 1) {
+      return w;
+    } else {
+      return wave.parApplySecond(w, repeater(w, n - 1));
+    }
+  }
+  describe("merge", function() {
+    this.timeout(20000);
+
+    const r = wave.sync(() => Math.random())
+
+    function range(max: number): Wave<never, number> {
+      return wave.map(r, (n) => Math.round(n * max));
+    }
+
+    function randomWait(max: number): Wave<never, void> {
+      return wave.chain(range(max), wave.after);
+    }
+
+    it("should merge output", () => {
+      
+      const s1 = s.fromRange(0, 1, 10);
+      const s2 = s.mergeMap(s1, (i) => s.mapM(s.fromRange(0, 1, 20), () => wave.as(randomWait(50), i)), 4);
+      const output = s.collectArray(s2);
+      const check = wave.chain(output, (values) => wave.sync(() => {
+        const uniq = array.uniq(eq.eqNumber)(values).sort();
+        const stats = array.array.map(uniq, (u) => [u, array.array.filter(values, (v) => v === u).length, values.indexOf(u), values.lastIndexOf(u)] as const)
+        // console.log(stats);
+        stats.forEach(([_i, ct]) => {
+          expect(ct).to.equal(20);
         })
-    })
+        for (let i = 0; i < 5; i++) {
+          // Verify that we never have more than 4 active
+          expect(stats[i][3]).to.be.lessThan(stats[i + 5][2])
+        }
+        return;
+      }));
+      return wave.runToPromise(repeater(check, 10));
+    });
   });
 });

@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import * as array from "fp-ts/lib/Array";
 import { Option, some, none } from "fp-ts/lib/Option";
 import * as o from "fp-ts/lib/Option";
 import { FunctionN, Predicate, Lazy, constant, identity } from "fp-ts/lib/function";
 import { pipe } from "fp-ts/lib/pipeable";
+import { Do } from "fp-ts-contrib/lib/Do";
 import * as wave from "waveguide/lib/wave";
 import { Wave, Fiber } from "waveguide/lib/wave";
 import * as managed from "waveguide/lib/managed";
@@ -31,6 +33,7 @@ import { Deferred } from "waveguide/lib/deferred";
 import * as deferred from "waveguide/lib/deferred";
 import * as semaphore from "waveguide/lib/semaphore";
 import { Monad2 } from "fp-ts/lib/Monad";
+import { raiseAbort } from "waveguide/lib/waver";
 
 export type Source<E, A> = Wave<E, Option<A>>
 
@@ -79,7 +82,7 @@ function iteratorSource<A>(iter: Iterator<A>): Source<never, A> {
 
 function* rangeIterator(start: number, interval?: number, end?: number): Iterator<number> {
   let current = start;
-  while (!end || current <= end) {
+  while (!end || current < end) {
     yield current;
     current += (interval || 1);
   }
@@ -757,21 +760,22 @@ export function zip<E, A, B>(as: Stream<E, A>, bs: Stream<E, B>): Stream<E, read
  * @param queue 
  * @param latch 
  */
-function queueLatchSource<E, A>(queue: ConcurrentQueue<Option<A>>, latch: Deferred<E, Option<A>>): Wave<E, Option<A>> {
+function queueBreakerSource<E, A>(queue: ConcurrentQueue<Option<A>>, breaker: Deferred<E, Option<A>>): Wave<E, Option<A>> {
   const take = pipe(
     queue.take,
     wave.chainTapWith((opt) =>
       pipe(
         opt,
         o.fold(
-          // Confirm we have seen the last element
-          () => latch.done(none),
-          () => wave.unit // just keep going
+          // Confirm we have seen the last element by closing the breaker so subsequent reads see it
+          constant(breaker.done(none)),
+          // do nothing to the breaker if we got an element
+          constant(wave.unit)
         )
       )
     )
   )
-  return wave.raceFirst(take, latch.wait);
+  return wave.raceFirst(take, breaker.wait);
 }
 
 /**
@@ -780,7 +784,7 @@ function queueLatchSource<E, A>(queue: ConcurrentQueue<Option<A>>, latch: Deferr
  * @param stream 
  */
 function streamQueueSource<E, A>(stream: Stream<E, A>): Managed<E, Wave<E, Option<A>>> {
-  return managed.map(sinkQueue(stream), ([q, latch]) => queueLatchSource(q, latch));
+  return managed.map(sinkQueue(stream), ([q, breaker]) => queueBreakerSource(q, breaker));
 }
 
 /**
@@ -833,63 +837,65 @@ export function switchLatest<E, A>(stream: Stream<E, Stream<E, A>>): Stream<E, A
     managed.chain(managed.zip(
       // The queue and latch to push into
       managed.encaseWave(cq.boundedQueue<Option<A>>(0)),
-      managed.encaseWave(deferred.makeDeferred<E, Option<A>>())), ([pushQueue, pushLatch]) =>
-    // The internal latch that can be used to signal failures and shut down the read process
-      managed.chain(managed.encaseWave(deferred.makeDeferred<never, Cause<E>>()), (internalLatch) =>
-        managed.chain(singleFiberSlot(), (fiberSlot) => { // somewhere to hold the currently running fiber
-          const interruptPushFiber = interruptFiberSlot(fiberSlot);
-          // Spawn a fiber that should push elements from stream into pushQueue as long as it is able
-          function spawnPushFiber(stream: Stream<E, A>): Wave<never, void> {
-            const writer = pipe(
-              // The writer process pushes things into the queue
-              into(map(stream, some), queueSink(pushQueue)),
-              // We need to trap any errors that occur and send those to internal latch to halt the process
-              // Dont' worry about interrupts, because it should be fine during cleanup
-              wave.foldExitWith(
-                internalLatch.done,
-                constant(wave.pure(undefined)) // we can do nothing because we will delegate to the proxy
-              )
-            )
-
-            return wave.applyFirst(
-              interruptPushFiber,
-              wave.chain(wave.fork(writer), (f) => fiberSlot.set(some(f)))
-            );
-          }
-
-          // pull streams and setup the push fibers appropriately
-          function advanceStreams(): Wave<never, void> {
-            // We need a way of looking ahead to see errors in the output streams in order to cause termination
-            // The push fiber will generate this when it encounters a failure
-            const latchError = wave.chain(internalLatch.wait, wave.raised);
-
-            return wave.foldExit(
-              wave.raceFirst(pull, latchError),
-              // In the event of an error either from pull or from upstream we need to shut everything down
-              (cause) => wave.applySecond(interruptPushFiber, pushLatch.cause(cause)),
-              (nextOpt) =>
-                pipe(
-                  nextOpt,
-                  o.fold(
-                    // nothing left, so we should wait the push fiber's completion and then forward the termination
-                    () => pipe(
-                      wave.race(latchError, waitFiberSlot(fiberSlot)),
-                      wave.foldExitWith(
-                        pushLatch.cause, // if we get a latchError forward it through to downstream
-                        constant(pushQueue.offer(none)) // otherwise we are done, so lets forward that
-                      )
-                    ),
-                    (next) => wave.applySecondL(spawnPushFiber(next), () => advanceStreams())
-                  )
+      managed.encaseWave(deferred.makeDeferred<E, Option<A>>())), ([pushQueue, pushBreaker]) =>
+        // The internal latch that can be used to signal failures and shut down the read process
+        managed.chain(managed.encaseWave(deferred.makeDeferred<never, Cause<E>>()), (internalBreaker) =>
+          // somewhere to hold the currently running fiber so we can interrupt it on termination
+          managed.chain(singleFiberSlot(), (fiberSlot) => {
+            const interruptPushFiber = interruptFiberSlot(fiberSlot);
+            // Spawn a fiber that should push elements from stream into pushQueue as long as it is able
+            function spawnPushFiber(stream: Stream<E, A>): Wave<never, void> {
+              const writer = pipe(
+                // The writer process pushes things into the queue
+                into(map(stream, some), queueSink(pushQueue)),
+                // We need to trap any errors that occur and send those to internal latch to halt the process
+                // Dont' worry about interrupts, because we perform cleanups for single fiber slot
+                wave.foldExitWith(
+                  internalBreaker.done,
+                  constant(wave.pure(undefined)) // we can do nothing because we will delegate to the proxy
                 )
-            );
-          }
-          // We can configure this source now, but it will be invalid outside of running fibers
-          // Thus we can use managed.fiber
-          const downstreamSource = queueLatchSource(pushQueue, pushLatch)
-          return managed.as(managed.fiber(advanceStreams()), downstreamSource);
-        })
-      )
+              )
+
+              return wave.applyFirst(
+                interruptPushFiber,
+                wave.chain(wave.fork(writer), (f) => fiberSlot.set(some(f)))
+              );
+            }
+
+            // pull streams and setup the push fibers appropriately
+            function advanceStreams(): Wave<never, void> {
+              // We need a way of looking ahead to see errors in the output streams in order to cause termination
+              // The push fiber will generate this when it encounters a failure
+              const breakerError = wave.chain(internalBreaker.wait, wave.raised);
+
+              return wave.foldExit(
+                wave.raceFirst(pull, breakerError),
+                // In the event of an error either from pull or from upstream we need to shut everything down
+                // On managed unwind the active production fiber will be interrupted if there is one
+                (cause) => pushBreaker.cause(cause),
+                (nextOpt) =>
+                  pipe(
+                    nextOpt,
+                    o.fold(
+                      // nothing left, so we should wait the push fiber's completion and then forward the termination
+                      () => pipe(
+                        wave.race(breakerError, waitFiberSlot(fiberSlot)),
+                        wave.foldExitWith(
+                          pushBreaker.cause, // if we get a latchError forward it through to downstream
+                          constant(pushQueue.offer(none)) // otherwise we are done, so lets forward that
+                        )
+                      ),
+                      (next) => wave.applySecondL(spawnPushFiber(next), () => advanceStreams())
+                    )
+                  )
+              );
+            }
+            // We can configure this source now, but it will be invalid outside of running fibers
+            // Thus we can use managed.fiber
+            const downstreamSource = queueBreakerSource(pushQueue, pushBreaker)
+            return managed.as(managed.fiber(advanceStreams()), downstreamSource);
+          })
+        )
     )
   )
   return fromSource(source);
@@ -905,26 +911,110 @@ export function switchMapLatest<E, A, B>(stream: Stream<E, A>, f: FunctionN<[A],
   return switchLatest(map(stream, f));
 }
 
-// /**
-//  * Merge a stream of streams into a single stream.
-//  * 
-//  * This stream will run up to maxActive streams concurrently to produce values into the output stream.
-//  * @param stream the input stream
-//  * @param maxActive the maximum number of streams to hold active at any given time
-//  * @param maxBuffer the maximum number of buffered elements for downstream. 
-//  * this controls how much active streams are able to collectively produce in the face of a slow downstream consumer
-//  */
-// export function merge<E, A>(stream: Stream<E, Stream<E, A>>, maxActive: number, maxBuffer = 12): Stream<E, A> {
-//   const boundedQueue = managed.encaseWave(cq.boundedQueue<Option<A>>(maxBuffer));
-//   const latch = managed.encaseWave(deferred.makeDeferred<E, Option<A>>());
-//   const sem = managed.encaseWave(semaphore.makeSemaphore(maxActive))
-//   const source = managed.chain(streamQueueSource(stream), (pull) =>
-//     managed.chain(managed.zip(boundedQueue, latch), ([pushQueue, pushLatch]) =>
-//       managed.encaseWave(wave.raiseAbort("BOOM"))
-//     )
-//   )
-//   throw new Error()
-// }
+interface Weave {
+  attach(action: Wave<never, void>): Wave<never, void>
+}
+
+type WeaveHandle = readonly [number, Fiber<never, void>];
+
+function interruptWeaveHandles(ref: Ref<WeaveHandle[]>): Wave<never, void> {
+  return wave.chain(ref.get, (fibers) =>
+    wave.asUnit(array.array.traverse(wave.instances)(fibers, (fiber) => fiber[1].interrupt))
+  )
+}
+
+// Track many fibers for the purpose of clean interruption on failure
+const makeWeave: Managed<never, Weave> =
+  managed.chain(managed.encaseWave(ref.makeRef(0)), (cell) =>
+    // On cleanup we want to interrupt any running fibers
+    managed.map(managed.bracket(ref.makeRef<WeaveHandle[]>([]), interruptWeaveHandles), (store) => {
+      function attach(action: Wave<never, void>): Wave<never, void> {
+        return Do(wave.instances)
+          .bind("next", cell.update((n) => n + 1))
+          .bind("fiber", wave.fork(action))
+          .doL(({ next, fiber }) => store.update((handles) => [...handles, [next, fiber] as const]))
+          // Spawn a fiber that will cleanup the handle reference on complete
+          .doL(({ next, fiber }) =>
+            wave.fork(wave.applySecond(fiber.wait, store.update(array.filter((h) => h[0] !== next))))
+          )
+          .return(constant(undefined as void));
+      }
+      return { attach };
+    })
+  );
+
+/**
+ * Merge a stream of streams into a single stream.
+ * 
+ * This stream will run up to maxActive streams concurrently to produce values into the output stream.
+ * @param stream the input stream
+ * @param maxActive the maximum number of streams to hold active at any given time
+ * this controls how much active streams are able to collectively produce in the face of a slow downstream consumer
+ */
+export function merge<E, A>(stream: Stream<E, Stream<E, A>>, maxActive: number): Stream<E, A> {
+  const source = managed.chain(streamQueueSource(stream), (pull) =>
+    managed.chain(managed.encaseWave(semaphore.makeSemaphore(maxActive)), (sem) =>
+      managed.chain(managed.encaseWave(cq.boundedQueue<Option<A>>(0)), (pushQueue) =>
+        managed.chain(managed.encaseWave(deferred.makeDeferred<E, Option<A>>()), (pushBreaker) =>
+          managed.chain(makeWeave, (weave) =>
+            managed.chain(managed.encaseWave(deferred.makeDeferred<never, Cause<E>>()), (internalBreaker) => {
+              function spawnPushFiber(stream: Stream<E, A>): Wave<never, void> {
+                const writer = pipe(
+                  // Process to sink elements into the queue
+                  into(map(stream, some), queueSink(pushQueue)),
+                  // TODO: I don't think we need to handle interrupts, it shouldn't be possible
+                  wave.foldExitWith(
+                    internalBreaker.done,
+                    constant(wave.pure(undefined))
+                  ),
+                )
+                return weave.attach(sem.withPermit(writer)); // we need a permit to start
+              }
+
+              // The action that will pull a single stream upstream and attempt to activate it to push downstream
+              function advanceStreams(): Wave<never, void> {
+                const breakerError = wave.chain(internalBreaker.wait, wave.raised);
+
+                return wave.foldExit(
+                  sem.withPermit(wave.raceFirst(
+                    sem.withPermit(pull), // we don't want to pull until there is capacity
+                    breakerError
+                  )), 
+                  pushBreaker.cause, // if upstream errored, we should push the failure downstream immediately
+                  (nextOpt) => // otherwise we should 
+                    pipe(
+                      nextOpt,
+                      o.fold(
+                        // The end has occured
+                        constant(pipe(
+                          // We will wait for an error or all active produces to finish
+                          wave.race(breakerError, sem.acquireN(maxActive)),
+                          wave.foldExitWith(
+                            pushBreaker.cause,
+                            constant(pushQueue.offer(none))
+                          )
+                        )),
+                        // Start the push fiber and then keep going
+                        (next) => wave.applySecondL(spawnPushFiber(next), constant(advanceStreams()))
+                      )
+                    )
+                )
+
+              }
+              const downstreamSource = queueBreakerSource(pushQueue, pushBreaker);
+              return managed.as(managed.fiber(advanceStreams()), downstreamSource);
+            })
+          )
+        )
+      )
+    )
+  );
+  return fromSource(source);
+}
+
+export function mergeMap<E, A, B>(stream: Stream<E, A>, f: FunctionN<[A], Stream<E, B>>, maxActive: number): Stream<E, B> {
+  return merge(map(stream, f), maxActive);
+}
 
 /**
  * Drop elements of the stream while a predicate holds

@@ -30,7 +30,8 @@ import { Wave } from "waveguide/lib/wave";
 import * as array from "fp-ts/lib/Array";
 import * as eq from "fp-ts/lib/Eq";
 
-describe("streams", () => {
+describe("streams", function () {
+  this.timeout(10000)
   describe("empty", () => {
     it("should be empty", () => {
       return expectExit(s.collectArray(s.empty), done([]));

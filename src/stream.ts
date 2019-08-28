@@ -905,26 +905,26 @@ export function switchMapLatest<E, A, B>(stream: Stream<E, A>, f: FunctionN<[A],
   return switchLatest(map(stream, f));
 }
 
-/**
- * Merge a stream of streams into a single stream.
- * 
- * This stream will run up to maxActive streams concurrently to produce values into the output stream.
- * @param stream the input stream
- * @param maxActive the maximum number of streams to hold active at any given time
- * @param maxBuffer the maximum number of buffered elements for downstream. 
- * this controls how much active streams are able to collectively produce in the face of a slow downstream consumer
- */
-export function merge<E, A>(stream: Stream<E, Stream<E, A>>, maxActive: number, maxBuffer = 12): Stream<E, A> {
-  const boundedQueue = managed.encaseWave(cq.boundedQueue<Option<A>>(maxBuffer));
-  const latch = managed.encaseWave(deferred.makeDeferred<E, Option<A>>());
-  const sem = managed.encaseWave(semaphore.makeSemaphore(maxActive))
-  const source = managed.chain(streamQueueSource(stream), (pull) =>
-    managed.chain(managed.zip(boundedQueue, latch), ([pushQueue, pushLatch]) =>
-      managed.encaseWave(wave.raiseAbort("BOOM"))
-    )
-  )
-  throw new Error()
-}
+// /**
+//  * Merge a stream of streams into a single stream.
+//  * 
+//  * This stream will run up to maxActive streams concurrently to produce values into the output stream.
+//  * @param stream the input stream
+//  * @param maxActive the maximum number of streams to hold active at any given time
+//  * @param maxBuffer the maximum number of buffered elements for downstream. 
+//  * this controls how much active streams are able to collectively produce in the face of a slow downstream consumer
+//  */
+// export function merge<E, A>(stream: Stream<E, Stream<E, A>>, maxActive: number, maxBuffer = 12): Stream<E, A> {
+//   const boundedQueue = managed.encaseWave(cq.boundedQueue<Option<A>>(maxBuffer));
+//   const latch = managed.encaseWave(deferred.makeDeferred<E, Option<A>>());
+//   const sem = managed.encaseWave(semaphore.makeSemaphore(maxActive))
+//   const source = managed.chain(streamQueueSource(stream), (pull) =>
+//     managed.chain(managed.zip(boundedQueue, latch), ([pushQueue, pushLatch]) =>
+//       managed.encaseWave(wave.raiseAbort("BOOM"))
+//     )
+//   )
+//   throw new Error()
+// }
 
 /**
  * Drop elements of the stream while a predicate holds

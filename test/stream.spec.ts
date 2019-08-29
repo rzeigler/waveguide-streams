@@ -141,6 +141,13 @@ describe("streams", function () {
       return expectExit(s.collectArray(s2), done([2, 4]));
     })
   })
+  describe("distinctAdjacent", () => {
+    it("should emit only distinct adjacent elements", () => {
+      const s1 = s.fromArray([1, 1, 2, 2, 2, 1, 3, 3, 2]);
+      const s2 = s.distinctAdjacent(eq.eqNumber)(s1);
+      return expectExit(s.collectArray(s2), done([1, 2, 1, 3, 2]));
+    })
+  })
   describe("scan", () => {
     it("should scan a stream", () => {
       const s1 = s.fromArray([1, 2]);
@@ -404,16 +411,9 @@ describe("streams", function () {
       const check = wave.chain(output, (values) => wave.sync(() => {
         const uniq = array.uniq(eq.eqNumber)(values).sort();
         const stats = array.array.map(uniq, (u) => [u, array.array.filter(values, (v) => v === u).length, values.indexOf(u), values.lastIndexOf(u)] as const)
-        console.log(stats);
         stats.forEach(([_i, ct]) => {
           expect(ct).to.equal(20);
         })
-        // This doesn't test the things I thought it tested, actually needs to check that no more than 3  previous max's 
-        // are greater than the current min (i.e. we have multiple active)
-        // for (let i = 0; i < 4; i++) {
-        //   // Verify that we never have more than 4 active
-        //   expect(stats[i][3]).to.be.lessThan(stats[i + 6][2])
-        // }
         return;
       }));
       return wave.runToPromise(repeater(check, 10));

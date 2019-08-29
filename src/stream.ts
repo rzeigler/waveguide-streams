@@ -17,6 +17,7 @@ import { Option, some, none } from "fp-ts/lib/Option";
 import * as o from "fp-ts/lib/Option";
 import { FunctionN, Predicate, Lazy, constant, identity } from "fp-ts/lib/function";
 import { pipe } from "fp-ts/lib/pipeable";
+import { Eq } from "fp-ts/lib/Eq";
 import { Do } from "fp-ts-contrib/lib/Do";
 import * as wave from "waveguide/lib/wave";
 import { Wave, Fiber } from "waveguide/lib/wave";
@@ -369,6 +370,33 @@ export function filterWith<A>(f: Predicate<A>): <E>(stream: Stream<E, A>) => Str
 }
 
 /**
+ * Filter the stream so that only items that are not equal to the previous item emitted are emitted
+ * @param eq 
+ */
+export function distinctAdjacent<A>(eq: Eq<A>): <E>(stream: Stream<E, A>) => Stream<E, A> {
+  return <E>(stream: Stream<E, A>) => 
+    managed.map(stream, (base) => 
+      <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], Wave<E, S>>): Wave<E, S> => {
+        const init: [S, Option<A>] = [initial, none];
+        const c: Predicate<[S, Option<A>]> = ([s]) => cont(s);
+        function stp(current: [S, Option<A>], next: A): Wave<E, [S, Option<A>]> {
+          return pipe(
+            current[1],
+            o.fold(
+              // We haven't seen anything so just return
+              () => wave.map(step(current[0], next), (s) => [s, some(next)]),
+              (seen) => eq.equals(seen, next) ? 
+                wave.pure(current) :
+                wave.map(step(current[0], next), (s) => [s, some(next)])
+            )
+          )
+        }
+        return wave.map(base(init, c, stp), (s) => s[0]);
+      }
+    )
+}
+
+/**
  * Fold the elements of this stream together using an effect.
  * 
  * The resulting stream will emit 1 element produced by the effectful fold
@@ -377,11 +405,11 @@ export function filterWith<A>(f: Predicate<A>): <E>(stream: Stream<E, A>) => Str
  * @param seed 
  */
 export function foldM<E, A, B>(stream: Stream<E, A>, f: FunctionN<[B, A], Wave<E, B>>, seed: B): Stream<E, B> {
-  return managed.map(stream, (outer) =>
+  return managed.map(stream, (base) =>
     <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, B], Wave<E, S>>): Wave<E, S> =>
       cont(initial) ?
         wave.chain(
-          outer(seed, constant(true), (s, a) => f(s, a)),
+          base(seed, constant(true), (s, a) => f(s, a)),
           (result) => step(initial, result)
         ) :
         wave.pure(initial)

@@ -930,12 +930,12 @@ export function switchLatest<E, A>(stream: Stream<E, Stream<E, A>>): Stream<E, A
 }
 
 /**
- * Create a straem that switches to emitting the elements of the most recent stream produced by applying f to the 
+ * Create a stream that switches to emitting the elements of the most recent stream produced by applying f to the 
  * element most recently emitted
  * @param stream 
  * @param f 
  */
-export function switchMapLatest<E, A, B>(stream: Stream<E, A>, f: FunctionN<[A], Stream<E, B>>): Stream<E, B> {
+export function chainSwitchLatest<E, A, B>(stream: Stream<E, A>, f: FunctionN<[A], Stream<E, B>>): Stream<E, B> {
   return switchLatest(map(stream, f));
 }
 
@@ -1040,8 +1040,12 @@ export function merge<E, A>(stream: Stream<E, Stream<E, A>>, maxActive: number):
   return fromSource(source);
 }
 
-export function mergeMap<E, A, B>(stream: Stream<E, A>, f: FunctionN<[A], Stream<E, B>>, maxActive: number): Stream<E, B> {
+export function chainMerge<E, A, B>(stream: Stream<E, A>, f: FunctionN<[A], Stream<E, B>>, maxActive: number): Stream<E, B> {
   return merge(map(stream, f), maxActive);
+}
+
+export function mergeAll<E, A>(streams: Array<Stream<E, A>>): Stream<E, A> {
+  return merge(fromArray(streams) as Stream<E, Stream<E, A>>, streams.length);
 }
 
 /**

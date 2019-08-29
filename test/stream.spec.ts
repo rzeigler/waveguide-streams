@@ -372,7 +372,7 @@ describe("streams", function () {
     });
     it("switching should occur", () => {
       const s1 = s.take(s.periodically(50), 10);
-      const s2 = s.switchMapLatest(s1, (i) => s.as(s.take(s.periodically(10), 10), i))
+      const s2 = s.chainSwitchLatest(s1, (i) => s.as(s.take(s.periodically(10), 10), i))
       const output = s.collectArray(s2);
       return wave.runToPromise(output)
         .then((values) => {
@@ -404,9 +404,8 @@ describe("streams", function () {
     }
 
     it("should merge output", () => {
-      
       const s1 = s.fromRange(0, 1, 10);
-      const s2 = s.mergeMap(s1, (i) => s.mapM(s.fromRange(0, 1, 20), () => wave.as(randomWait(50), i)), 4);
+      const s2 = s.chainMerge(s1, (i) => s.mapM(s.fromRange(0, 1, 20), () => wave.as(randomWait(50), i)), 4);
       const output = s.collectArray(s2);
       const check = wave.chain(output, (values) => wave.sync(() => {
         const uniq = array.uniq(eq.eqNumber)(values).sort();

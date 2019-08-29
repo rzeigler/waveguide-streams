@@ -17,7 +17,12 @@ import { constant, FunctionN, flow, Predicate, identity } from "fp-ts/lib/functi
 import * as wave from "waveguide/lib/wave";
 import { Wave } from "waveguide/lib/wave";
 import { SinkStep, sinkDone, sinkCont, isSinkDone } from "./step";
+import * as step from "./step";
 import { ConcurrentQueue } from "waveguide/lib/queue";
+import { left, right, Either } from "fp-ts/lib/Either";
+import * as either from "fp-ts/lib/Either";
+import { pipe } from "fp-ts/lib/pipeable";
+import { Do } from "fp-ts-contrib/lib/Do";
 
 
 export interface Sink<E, S, A, B> {
@@ -79,6 +84,11 @@ export function drainSink<E, A>(): Sink<E, void, A, void> {
   return { initial, extract, step };
 }
 
+
+/**
+ * A sink that consumes no input to produce a constant b
+ * @param b 
+ */
 export function constSink<E, A, B>(b: B): Sink<E, void, A, B> {
   const initial = wave.pure(sinkDone(undefined as void, []));
   const extract = constant(wave.pure(b));
@@ -88,6 +98,9 @@ export function constSink<E, A, B>(b: B): Sink<E, void, A, B> {
   return { initial, extract, step };
 }
 
+/**
+ * A sink that produces the head element of a stream (if any elements are emitted)
+ */
 export function headSink<E, A>(): Sink<E, Option<A>, A, Option<A>> {
   const initial = wave.pure(sinkCont(none));
 
@@ -97,6 +110,9 @@ export function headSink<E, A>(): Sink<E, Option<A>, A, Option<A>> {
   return { initial, extract: wave.pure, step };
 }
 
+/**
+ * A sink that produces the last element of a stream (if any elements are emitted)
+ */
 export function lastSink<E, A>(): Sink<E, Option<A>, A, Option<A>> {
   const initial = wave.pure(sinkCont(none));
 
@@ -106,6 +122,10 @@ export function lastSink<E, A>(): Sink<E, Option<A>, A, Option<A>> {
   return { initial, extract: wave.pure, step };
 }
 
+/**
+ * A sink that evalutes an action for every element of a sink and produces no value
+ * @param f 
+ */
 export function evalSink<E, A>(f: FunctionN<[A], Wave<E, unknown>>): Sink<E, void, A, void> {
   const initial = wave.pure(sinkCont(undefined as void));
 
@@ -118,6 +138,12 @@ export function evalSink<E, A>(f: FunctionN<[A], Wave<E, unknown>>): Sink<E, voi
   return { initial, extract, step };
 }
 
+/**
+ * A sink that consumes elements for which a predicate does not hold.
+ * 
+ * Returns the first element for which the predicate did hold if such an element is found.
+ * @param f 
+ */
 export function drainWhileSink<E, A>(f: Predicate<A>): Sink<E, Option<A>, A, Option<A>> {
   const initial = sinkCont(none as Option<A>);
     
@@ -130,6 +156,11 @@ export function drainWhileSink<E, A>(f: Predicate<A>): Sink<E, Option<A>, A, Opt
   return liftPureSink({ initial, extract, step });
 } 
 
+/**
+ * A sink that offers elements into a concurrent queue
+ * 
+ * @param queue 
+ */
 export function queueSink<E, A>(queue: ConcurrentQueue<A>): Sink<E, void, A, void> {
   const initial = wave.pure(sinkCont(undefined));
 
@@ -141,6 +172,28 @@ export function queueSink<E, A>(queue: ConcurrentQueue<A>): Sink<E, void, A, voi
   return { initial, extract, step };
 }
 
+/**
+ * A sink that offers elements into a queue after wrapping them in an option.
+ * 
+ * The sink will offer one final none into the queue when the stream terminates
+ * @param queue 
+ */
+export function queueOptionSink<E, A>(queue: ConcurrentQueue<Option<A>>): Sink<E, void, A, void> {
+  const initial = wave.pure(sinkCont(undefined));
+
+  function step(_state: void, a: A): Wave<E, SinkStep<A, void>> {
+    return wave.as(queue.offer(some(a)), sinkCont(undefined));
+  }
+
+  const extract = constant(queue.offer(none));
+  return { initial, extract, step };
+}
+
+/**
+ * Map the output value of a sink
+ * @param sink 
+ * @param f 
+ */
 export function map<E, S, A, B, C>(sink: Sink<E, S, A, B>, f: FunctionN<[B], C>): Sink<E, S, A, C> {
   return {
     ...sink,

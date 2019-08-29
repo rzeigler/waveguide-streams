@@ -66,6 +66,10 @@ export function map<A0, S, S1>(step: SinkStep<A0, S>, f: FunctionN<[S], S1>): Si
   };
 }
 
+export function mapWith<S, S1>(f: FunctionN<[S], S1>): <A>(step: SinkStep<A, S>) => SinkStep<A, S1> {
+  return <A>(step: SinkStep<A, S>) => map(step, f);
+}
+
 export function traverse<F>(F: Applicative<F>): <A0, S, S1>(step: SinkStep<A0, S>, f: FunctionN<[S], HKT<F, S1>>) => HKT<F, SinkStep<A0, S1>> {
   return <A0, S, S1>(step: SinkStep<A0, S>, f: FunctionN<[S], HKT<F, S1>>): HKT<F, SinkStep<A0, S1>> =>
     F.map(f(step.state), (s1) => ({...step, state: s1}))

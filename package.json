@@ -1,6 +1,6 @@
 {
   "name": "waveguide-streams",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "An effect type for typescript/javascript",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -56,11 +56,11 @@
     "source-map-support": "^0.5.10",
     "ts-node": "^8.3.0",
     "typescript": "^3.5.3",
-    "waveguide": "1.0.0-rc.3"
+    "waveguide": "1.0.0"
   },
   "peerDependencies": {
     "fp-ts": "^2.0.0",
-    "waveguide": "1.0.0-rc.3"
+    "waveguide": "1.0.0"
   },
   "dependencies": {
     "fp-ts-contrib": "^0.1.2"

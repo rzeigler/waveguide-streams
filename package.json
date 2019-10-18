@@ -37,8 +37,8 @@
     "@types/deep-equal": "^1.0.1",
     "@types/mocha": "^5.2.5",
     "@types/node": "^12.0.2",
-    "@typescript-eslint/eslint-plugin": "^2.0.0",
-    "@typescript-eslint/parser": "^2.0.0",
+    "@typescript-eslint/eslint-plugin": "^2.4.0",
+    "@typescript-eslint/parser": "^2.4.0",
     "chai": "^4.2.0",
     "chai-as-promised": "^7.1.1",
     "deep-equal": "^1.0.1",
@@ -47,7 +47,7 @@
     "eslint": "^6.2.2",
     "esm": "^3.2.5",
     "fast-check": "^1.14.0",
-    "fp-ts": "^2.0.0",
+    "fp-ts": "^2.1.0",
     "mocha": "^5.2.0",
     "mocha-cli": "^1.0.1",
     "nodemon": "^1.18.10",
@@ -55,12 +55,12 @@
     "rimraf": "^2.6.3",
     "source-map-support": "^0.5.10",
     "ts-node": "^8.3.0",
-    "typescript": "^3.5.3",
-    "waveguide": "1.0.0"
+    "typescript": "^3.6.4",
+    "waveguide": "^1.2.1"
   },
   "peerDependencies": {
-    "fp-ts": "^2.0.0",
-    "waveguide": "1.0.0"
+    "fp-ts": "^2.1.0",
+    "waveguide": "^1.2.1"
   },
   "dependencies": {
     "fp-ts-contrib": "^0.1.2"

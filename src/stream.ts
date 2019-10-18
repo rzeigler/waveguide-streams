@@ -35,6 +35,7 @@ import * as deferred from "waveguide/lib/deferred";
 import * as semaphore from "waveguide/lib/semaphore";
 import { Monad2 } from "fp-ts/lib/Monad";
 import { raiseAbort } from "waveguide/lib/waver";
+import { Semaphore } from "waveguide/lib/semaphore";
 
 export type Source<E, A> = Wave<E, Option<A>>
 
@@ -68,7 +69,7 @@ function arrayFold<E, A>(as: readonly A[]): Managed<E, Fold<E, A>> {
         }
         return step(initial);
       }
-    }));
+    })) as Managed<E, Fold<E, A>>;
 }
 
 function iteratorSource<A>(iter: Iterator<A>): Source<never, A> {
@@ -224,7 +225,7 @@ export function encaseWave<E, A>(w: Wave<E, A>): Stream<E, A> {
     }
     return wave.pure(initial);
   }
-  return managed.pure(fold)
+  return managed.pure(fold) as Stream<E, A>;
 }
 
 /**
@@ -298,7 +299,7 @@ export function concatL<E, A>(stream1: Stream<E, A>, stream2: Lazy<Stream<E, A>>
       )
     );
   }
-  return managed.pure(fold);
+  return managed.pure(fold) as Stream<E, A>;
 }
 
 /**
@@ -374,8 +375,8 @@ export function filterWith<A>(f: Predicate<A>): <E>(stream: Stream<E, A>) => Str
  * @param eq 
  */
 export function distinctAdjacent<A>(eq: Eq<A>): <E>(stream: Stream<E, A>) => Stream<E, A> {
-  return <E>(stream: Stream<E, A>) => 
-    managed.map(stream, (base) => 
+  return <E>(stream: Stream<E, A>) =>
+    managed.map(stream, (base) =>
       <S>(initial: S, cont: Predicate<S>, step: FunctionN<[S, A], Wave<E, S>>): Wave<E, S> => {
         const init: [S, Option<A>] = [initial, none];
         const c: Predicate<[S, Option<A>]> = ([s]) => cont(s);
@@ -385,7 +386,7 @@ export function distinctAdjacent<A>(eq: Eq<A>): <E>(stream: Stream<E, A>) => Str
             o.fold(
               // We haven't seen anything so just return
               () => wave.map(step(current[0], next), (s) => [s, some(next)]),
-              (seen) => eq.equals(seen, next) ? 
+              (seen) => eq.equals(seen, next) ?
                 wave.pure(current) :
                 wave.map(step(current[0], next), (s) => [s, some(next)])
             )
@@ -444,7 +445,7 @@ export function scanM<E, A, B>(stream: Stream<E, A>, f: FunctionN<[B, A], Wave<E
     pipe(
       managed.zip(
         stream,
-        managed.encaseWave(ref.makeRef(seed))
+        managed.encaseWave(ref.makeRef(seed) as Wave<E, Ref<B>>)
       ),
       managed.mapWith(
         ([base, accum]) => {
@@ -709,8 +710,8 @@ function sinkQueue<E, A>(stream: Stream<E, A>): Managed<E, readonly [ConcurrentQ
   return managed.chain(
     managed.zip(
       // 0 allows maximum backpressure throttling (i.e. a reader must be waiting already to produce the item)
-      managed.encaseWave(cq.boundedQueue<Option<A>>(0)),
-      managed.encaseWave(deferred.makeDeferred<E, Option<A>>())
+      managed.encaseWave(cq.boundedQueue<Option<A>>(0) as Wave<E, ConcurrentQueue<Option<A>>>),
+      managed.encaseWave(deferred.makeDeferred<E, Option<A>>() as Wave<E, Deferred<E, A>>)
     ),
     ([q, latch]) => {
       const write = pipe(
@@ -720,7 +721,7 @@ function sinkQueue<E, A>(stream: Stream<E, A>): Managed<E, readonly [ConcurrentQ
           constant(q.offer(none))
         )
       )
-      return managed.as(managed.fiber(write), [q, latch] as const)
+      return managed.as(managed.fiber(write), [q, latch] as const) as Managed<E, readonly [ConcurrentQueue<Option<A>>, Deferred<E, Option<A>>]>
     }
   )
 }
@@ -824,7 +825,7 @@ function streamQueueSource<E, A>(stream: Stream<E, A>): Managed<E, Wave<E, Optio
  */
 export function peel<E, A, S, B>(stream: Stream<E, A>, sink: Sink<E, S, A, B>): Stream<E, readonly [B, Stream<E, A>]> {
   return managed.chain(streamQueueSource(stream), (pull) => {
-    const pullStream = fromSource<E, A>(managed.pure(pull));
+    const pullStream = fromSource<E, A>(managed.pure(pull) as Managed<E, Wave<E, Option<A>>>);
     // We now have a shared pull instantiation that we can use as a sink to drive and return as a stream
     return pipe(
       encaseWave(intoLeftover(pullStream, sink)),
@@ -864,12 +865,12 @@ export function switchLatest<E, A>(stream: Stream<E, Stream<E, A>>): Stream<E, A
   const source = managed.chain(streamQueueSource(stream), (pull) => // read streams
     managed.chain(managed.zip(
       // The queue and latch to push into
-      managed.encaseWave(cq.boundedQueue<Option<A>>(0)),
-      managed.encaseWave(deferred.makeDeferred<E, Option<A>>())), ([pushQueue, pushBreaker]) =>
+      managed.encaseWave(cq.boundedQueue<Option<A>>(0) as Wave<E, ConcurrentQueue<Option<A>>>),
+      managed.encaseWave(deferred.makeDeferred<E, Option<A>, E>())), ([pushQueue, pushBreaker]) =>
     // The internal latch that can be used to signal failures and shut down the read process
-      managed.chain(managed.encaseWave(deferred.makeDeferred<never, Cause<E>>()), (internalBreaker) =>
+      managed.chain(managed.encaseWave(deferred.makeDeferred<never, Cause<E>, E>()), (internalBreaker) =>
       // somewhere to hold the currently running fiber so we can interrupt it on termination
-        managed.chain(singleFiberSlot(), (fiberSlot) => {
+        managed.chain(singleFiberSlot() as Managed<E, Ref<Option<Fiber<never, void>>>>, (fiberSlot) => {
           const interruptPushFiber = interruptFiberSlot(fiberSlot);
           // Spawn a fiber that should push elements from stream into pushQueue as long as it is able
           function spawnPushFiber(stream: Stream<E, A>): Wave<never, void> {
@@ -921,7 +922,7 @@ export function switchLatest<E, A>(stream: Stream<E, Stream<E, A>>): Stream<E, A
           // We can configure this source now, but it will be invalid outside of running fibers
           // Thus we can use managed.fiber
           const downstreamSource = queueBreakerSource(pushQueue, pushBreaker)
-          return managed.as(managed.fiber(advanceStreams()), downstreamSource);
+          return managed.as(managed.fiber(advanceStreams()) as Managed<E, Fiber<never, void>>, downstreamSource);
         })
       )
     )
@@ -981,11 +982,15 @@ const makeWeave: Managed<never, Weave> =
  */
 export function merge<E, A>(stream: Stream<E, Stream<E, A>>, maxActive: number): Stream<E, A> {
   const source = managed.chain(streamQueueSource(stream), (pull) =>
-    managed.chain(managed.encaseWave(semaphore.makeSemaphore(maxActive)), (sem) =>
-      managed.chain(managed.encaseWave(cq.boundedQueue<Option<A>>(0)), (pushQueue) =>
-        managed.chain(managed.encaseWave(deferred.makeDeferred<E, Option<A>>()), (pushBreaker) =>
-          managed.chain(makeWeave, (weave) =>
-            managed.chain(managed.encaseWave(deferred.makeDeferred<never, Cause<E>>()), (internalBreaker) => {
+    managed.chain(managed.encaseWave(semaphore.makeSemaphore(maxActive) as Wave<E, Semaphore>), (sem) =>
+    // create the queue that output will be forced into
+      managed.chain(managed.encaseWave(cq.boundedQueue<Option<A>>(0) as Wave<E, ConcurrentQueue<Option<A>>>), (pushQueue) =>
+      // create the mechanism t hrough which we can signal completion
+        managed.chain(managed.encaseWave(deferred.makeDeferred<E, Option<A>, E>()), (pushBreaker) =>
+          managed.chain(makeWeave as Managed<E, Weave>, (weave) =>
+            managed.chain(managed.encaseWave(deferred.makeDeferred<never, Cause<E>, E>()), (internalBreaker) => {
+              // create a wave action that will proxy elements created by running the stream into the push queue
+              // if any errors occur, we set the breaker
               function spawnPushFiber(stream: Stream<E, A>): Wave<never, void> {
                 const writer = pipe(
                   // Process to sink elements into the queue
@@ -1007,7 +1012,7 @@ export function merge<E, A>(stream: Stream<E, Stream<E, A>>, maxActive: number):
                   wave.raceFirst(
                     pull, // we don't want to pull until there is capacity
                     breakerError
-                  ), 
+                  ),
                   pushBreaker.cause, // if upstream errored, we should push the failure downstream immediately
                   (nextOpt) => // otherwise we should 
                     pipe(
@@ -1023,14 +1028,14 @@ export function merge<E, A>(stream: Stream<E, Stream<E, A>>, maxActive: number):
                           )
                         )),
                         // Start the push fiber and then keep going
-                        (next) =>  wave.applySecondL(sem.withPermit(spawnPushFiber(next)), constant(advanceStreams()))
+                        (next) => wave.applySecondL(sem.withPermit(spawnPushFiber(next)), constant(advanceStreams()))
                       )
                     )
                 )
 
               }
               const downstreamSource = queueBreakerSource(pushQueue, pushBreaker);
-              return managed.as(managed.fiber(advanceStreams()), downstreamSource);
+              return managed.as(managed.fiber(advanceStreams()) as Managed<E, Fiber<never, void>>, downstreamSource);
             })
           )
         )

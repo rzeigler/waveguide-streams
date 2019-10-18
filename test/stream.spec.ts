@@ -323,7 +323,7 @@ describe("streams", function () {
       const s1 = s.fromRange(0);
       const s2 = s.fromRange(0, 1, 4);
       const s3 = s.zip(s1, s2);
-      return expectExit(s.collectArray(s3), done([[0, 0], [1, 1], [2, 2], [3, 3]]));
+      return expectExit(s.collectArray(s3), done([[0, 0], [1, 1], [2, 2], [3, 3]]) as any);
     });
     it("should handle errors", () => {
       const s1 = s.fromRange(0) as Stream<string, number>;
